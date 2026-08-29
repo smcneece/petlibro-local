@@ -145,7 +145,7 @@ Two setup paths are available when adding a device.
 
 **Auto Setup** stops Mosquitto for up to 60 seconds, captures the device's credentials automatically when it reconnects, and adds them to Mosquitto without any manual copy/paste. The device type is detected from the serial number prefix. A color/variant picker lets you choose the correct product image.
 
-> **Tip:** If the app detects the device successfully but it still isn't connecting to Mosquitto afterward, try triggering the Wi-Fi reconnect in the Petlibro app a second time. Some devices need two reconnect attempts before they fully switch over to the local broker. Also try blocking the device from the internet may work too. 
+> **Tip:** If the app detects the device successfully but it still isn't connecting to Mosquitto afterward, try triggering the Wi-Fi reconnect in the Petlibro app a second time. Some devices need two reconnect attempts before they fully switch over to the local broker. Blocking the device from the internet may help too.
 
 **Manual Setup** is for cases where you already have the MQTT username and password (for example, from MQTT Explorer during a previous capture). Enter the serial number, credentials, device type, and color variant manually.
 

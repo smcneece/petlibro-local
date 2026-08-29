@@ -1,6 +1,17 @@
 const BASE = window.__BASE__;
 const VERSION = window.__VERSION__;
 
+// Delays calling fn until ms have passed since the last call. Used for
+// auto-save fields where rapid repeated changes (e.g. clicking a number
+// input's spinner arrows) would otherwise send one command per click.
+function _debounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
 // ── i18n ──────────────────────────────────────────────────────────────────
 let _t = {};
 
@@ -161,10 +172,13 @@ function _localToUtc(hhmm) {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
+// Rounded, not floored: a value just saved as "N days" is always read back a
+// few milliseconds later, so flooring would show N-1 essentially every time
+// (20.99999 days floors to 20 even though nothing meaningfully elapsed).
 function filterDaysRemaining(d) {
   const ts = d.filterNextReplacementTimestamp;
   if (ts == null) return null;
-  return Math.max(0, Math.floor((ts - Date.now()) / 86400000));
+  return Math.max(0, Math.round((ts - Date.now()) / 86400000));
 }
 
 function cleaningDaysRemaining(d) {
@@ -172,7 +186,7 @@ function cleaningDaysRemaining(d) {
   const interval = d.cleaning_interval_days ?? 30;
   if (ts == null) return null;
   const due = ts + interval * 86400000;
-  return Math.floor((due - Date.now()) / 86400000);
+  return Math.round((due - Date.now()) / 86400000);
 }
 
 function desiccantDaysRemaining(d) {
@@ -180,19 +194,19 @@ function desiccantDaysRemaining(d) {
   const interval = d.desiccant_life_days ?? 14;
   if (ts == null) return null;
   const due = ts + interval * 86400000;
-  return Math.floor((due - Date.now()) / 86400000);
+  return Math.round((due - Date.now()) / 86400000);
 }
 function bowlDaysRemaining(d) {
   const ts = d.last_bowl_cleaned_ts;
   const interval = d.bowl_cleaning_interval_days ?? 7;
   if (ts == null) return null;
-  return Math.floor((ts + interval * 86400000 - Date.now()) / 86400000);
+  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function housingDaysRemaining(d) {
   const ts = d.last_housing_cleaned_ts;
   const interval = d.housing_cleaning_interval_days ?? 30;
   if (ts == null) return null;
-  return Math.floor((ts + interval * 86400000 - Date.now()) / 86400000);
+  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function _fmt12h(h, m) {
   const ampm = h >= 12 ? t("time.pm") : t("time.am");

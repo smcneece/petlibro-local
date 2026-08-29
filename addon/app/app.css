@@ -192,8 +192,6 @@
   @media (min-width: 600px) { .device-grid { grid-template-columns: repeat(3, 1fr); } }
   @media (min-width: 900px) { .device-grid { grid-template-columns: repeat(4, 1fr); } }
   @media (max-width: 599px) {
-    .card-pet-avatar { width: 36px; height: 36px; font-size: 16px; }
-    .card-pets { gap: 4px; bottom: 6px; left: 6px; }
     .btn-add { display: none; }
     .card-img-wrap { aspect-ratio: 3/2; }
     .stat-secondary { display: none; }
@@ -250,6 +248,17 @@
     box-shadow: 0 2px 8px rgba(0,0,0,.5);
   }
   .card-pet-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .card-pet-overflow {
+    background: var(--pl-surface-2);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--pl-text);
+  }
+  @media (max-width: 599px) {
+    .card-pet-avatar { width: 32px; height: 32px; font-size: 14px; }
+    .card-pet-overflow { font-size: 12px; }
+    .card-pets { gap: 4px; bottom: 6px; left: 6px; }
+  }
   .card-body { padding: 10px 12px 12px; }
   .card-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card-room { font-size: 12px; color: var(--pl-subtext); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

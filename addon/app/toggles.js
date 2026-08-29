@@ -4,7 +4,7 @@ async function togglePump(device) {
   try {
     await api("POST", `/api/devices/${device.serial}/command`, { waterStopSwitch: newVal });
     _patchDevice(device.serial, { waterStopSwitch: newVal });
-    renderDeviceTab("overview");
+    renderDeviceTab(_currentDeviceTab);
   } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
 }
 
@@ -13,7 +13,7 @@ async function toggleLight(device) {
   try {
     await api("POST", `/api/devices/${device.serial}/command`, { lightSwitch: newVal });
     _patchDevice(device.serial, { lightSwitch: newVal });
-    renderDeviceTab("overview");
+    renderDeviceTab(_currentDeviceTab);
   } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
 }
 
@@ -22,7 +22,7 @@ async function toggleFilterLed(device) {
   try {
     await api("POST", `/api/devices/${device.serial}/command`, { filterLedSwitch: newVal });
     _patchDevice(device.serial, { filterLedSwitch: newVal });
-    renderDeviceTab("overview");
+    renderDeviceTab(_currentDeviceTab);
   } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
 }
 

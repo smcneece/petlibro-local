@@ -10,8 +10,15 @@ Requirements: Python 3.9+, no extra packages needed.
 
 Setup overview
 --------------
-1. Find your device's serial number prefix (first 4-6 characters of the serial,
-   visible in the PetLibro app under device settings). Set SERIAL_PREFIX below.
+1. Find your device's serial number (visible in the PetLibro app under device
+   settings). Set SERIAL_PREFIX below to the FULL serial, not just the first
+   few characters. If you own more than one device of the same type, they
+   very likely share the same short prefix, and a partial match would proxy
+   and log traffic (including MQTT credentials) from whichever one connects
+   first, not necessarily the one you meant to capture. A full serial still
+   works fine as a prefix match (it just matches itself exactly) and is the
+   only way to guarantee you're capturing the right device when you own more
+   than one of the same kind.
 
 2. Find the real PetLibro cloud IP. On a machine that is NOT being redirected by
    Pi-hole or a split-DNS rule, run:
@@ -45,8 +52,11 @@ from datetime import datetime
 
 # ── Configure these before running ───────────────────────────────────────────
 
-# First 4-6 characters of your device's serial number (case-insensitive).
-# Only connections from a matching device are proxied; everything else is dropped.
+# Your device's FULL serial number (case-insensitive), not just a short prefix.
+# Only connections from a matching device are proxied; everything else is
+# dropped. If you own multiple devices of the same type, they likely share
+# a short prefix, so use the complete serial to avoid capturing the wrong
+# one's traffic and credentials.
 SERIAL_PREFIX = "XXXX"
 
 # Real PetLibro cloud IP. Resolve mqtt.us.petlibro.com via 8.8.8.8 and paste here.

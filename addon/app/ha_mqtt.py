@@ -136,6 +136,13 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "icon":                "mdi:cup-water",
         })))
 
+        entities.append(("sensor", "last_drink", _e(serial, "last_drink", b, {
+            "name":         "Last Drink",
+            "state_topic":  state_topic(serial, "last_drink"),
+            "device_class": "timestamp",
+            "icon":         "mdi:cup-water",
+        })))
+
         entities.append(("sensor", "filter_days", _e(serial, "filter_days", b, {
             "name":                "Filter Days Remaining",
             "state_topic":         state_topic(serial, "filter_days"),
@@ -408,6 +415,11 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if device_type == "dockstream2_cordless" and "electricQuantity" in state:
             await client.publish(state_topic(serial, "battery"), str(state["electricQuantity"]), retain=True)
+
+        last_drink = cfg.get("last_drink_ts")
+        if last_drink:
+            dt = datetime.datetime.fromtimestamp(int(last_drink), tz=datetime.timezone.utc)
+            await client.publish(state_topic(serial, "last_drink"), dt.isoformat(), retain=True)
 
     # Feeder
     elif device_type == "one_rfid":

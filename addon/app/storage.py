@@ -51,6 +51,9 @@ ALLOWED_DEVICE_FIELDS = {
     "last_fed_ts",
     "last_eating_secs",
     "battery_low_pct",
+    "light_start_time",
+    "light_end_time",
+    "last_drink_ts",
 }
 
 ALLOWED_PET_FIELDS = {

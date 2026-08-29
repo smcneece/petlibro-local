@@ -28,6 +28,7 @@ _last_attr_poll: dict[str, float] = {}  # epoch of last proactive ATTR_GET_SERVI
 OFFLINE_ALERT_DELAY_SECS = 90
 WATCHDOG_SECS = 300  # mark offline after 5 min of silence
 ATTR_POLL_INTERVAL_SECS = 300  # re-query full attribute state periodically, not just at connect
+FOUNTAIN_DRINK_DEDUP_SECS = 15  # ignore a second qualifying weight-drop this soon after the last logged one
 
 # Rolling capture of raw dl/ traffic for diagnostics (Help/About "Download
 # Debug Capture"). Devices only chirp occasionally, so this is passive and
@@ -94,6 +95,31 @@ def register_device(serial: str, model: str, device_type: str):
         _reconnect_event.set()
 
 
+async def _poll_attr_state(serial: str, device_type: str):
+    """Sends an ATTR_GET_SERVICE query so we don't have to wait for the
+    device's own next spontaneous report. Some fields (e.g. a fountain's
+    currentWeight) don't appear to ride along on a device's connect-time
+    push at all -- only on an actual weight-change event or a query like
+    this one -- so a freshly (re)connected device could otherwise sit with
+    no water-level reading until something happens to trigger one."""
+    global _client_ref
+    if _client_ref is None:
+        return
+    import time as _t
+    now = _t.time()
+    _last_attr_poll[serial] = now
+    try:
+        svc_topic = _service_sub_topic(device_type, serial)
+        payload = json.dumps({
+            "cmd":   "ATTR_GET_SERVICE",
+            "ts":    int(now * 1000),
+            "msgId": f"{serial}_poll{int(now)}",
+        })
+        await _client_ref.publish(svc_topic, payload)
+    except Exception:
+        _LOGGER.exception("ATTR_GET_SERVICE poll failed for %s...", serial[:6])
+
+
 def _mark_online(serial: str):
     """Mark device online and clear any pending offline timer."""
     import time as _t
@@ -104,6 +130,13 @@ def _mark_online(serial: str):
         _offline_since.pop(serial, None)
         if _client_ref is not None:
             asyncio.ensure_future(ha_mqtt.publish_availability(_client_ref, serial, True))
+            device_type = _devices.get(serial, (None, None))[1]
+            if device_type:
+                # Poll full attribute state right away instead of waiting up
+                # to ATTR_POLL_INTERVAL_SECS for the next watchdog sweep --
+                # shaves the "just added/reconnected, no readings yet" gap
+                # a new device would otherwise sit in.
+                asyncio.ensure_future(_poll_attr_state(serial, device_type))
 
 
 def _mark_offline(serial: str):
@@ -561,6 +594,21 @@ async def handle_ha_command(serial: str, cmd: dict) -> None:
                 _storage.save_device(serial, {"display_icon_name": name, "display_icon": 0})
                 asyncio.ensure_future(_publish_ha_state(serial))
             _LOGGER.info("API Custom frame %s...: %s", serial[:6], "ok" if ok else "failed")
+    elif "_light_schedule" in cmd:
+        sched = cmd["_light_schedule"] or {}
+        start = sched.get("start")
+        end = sched.get("end")
+        if start and end:
+            import storage as _storage
+            _storage.save_device(serial, {"light_start_time": start, "light_end_time": end})
+            ok = await send_command(serial, {
+                "lightingStartTime": start,
+                "lightingStartTimeUtc": _local_hhmm_to_utc(start),
+                "lightingEndTime": end,
+                "lightingEndTimeUtc": _local_hhmm_to_utc(end),
+            })
+            asyncio.ensure_future(_publish_ha_state(serial))
+            _LOGGER.info("API Light Schedule %s...: %s", serial[:6], "ok" if ok else "failed")
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -701,6 +749,24 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         asyncio.ensure_future(_check_and_fire_alerts(serial))
         return
 
+    if cmd == "WEIGHT_CLR_SERVICE":
+        # Scale zero-calibration ack. One captured example: a lone `code: 3007`
+        # response when the water container was still on the scale, versus a
+        # `code: 0` -> `code: 3001` -> `code: 3003` sequence (the last one
+        # carrying a "zero_standar_bcd:..." msg reporting the new baseline)
+        # once the container was actually removed first. Not documented
+        # anywhere, just one aligned before/after example, so this is our
+        # best current read of these codes, not a confirmed spec.
+        import time as _time
+        code = data.get("code")
+        msg = data.get("msg", "")
+        _state.setdefault(serial, {})["_scale_calibration"] = {
+            "code": code, "msg": msg, "ts": int(_time.time() * 1000),
+        }
+        _LOGGER.debug("WEIGHT_CLR_SERVICE ack from %s...: code=%s msg=%s", serial[:6], code, msg)
+        _mark_online(serial)
+        return
+
     if cmd == "WEIGHT_CHANGE_EVENT":
         # RFID-capable fountain (Dockstream RFID Smart Fountain / PLWF305):
         # reports which pet's tag(s) were near the bowl during a detected
@@ -709,6 +775,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         asyncio.ensure_future(_handle_fountain_drink(serial, data))
         _mark_online(serial)
         asyncio.ensure_future(_check_and_fire_alerts(serial))
+        asyncio.ensure_future(_publish_ha_state(serial))
         return
 
     if cmd == "WAREHOUSE_DOOR_EVENT":
@@ -809,10 +876,25 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                 grams = mod.track_intake(old_state, _state[serial], min_grams=min_drink)
                 if grams:
                     try:
+                        import time as _time
                         import storage as _storage
-                        _storage.record_intake(serial, grams)
-                        _storage.log_fountain_event(serial, "drink", grams=grams)
-                        _LOGGER.debug("Recorded %.0fg drink for %s...", grams, serial[:6])
+                        now_ms = int(_time.time() * 1000)
+                        last_ms = _state[serial].get("_last_drink_log_ms")
+                        if last_ms and (now_ms - last_ms) < FOUNTAIN_DRINK_DEDUP_SECS * 1000:
+                            # A second qualifying weight-drop within a few seconds
+                            # of one we just logged -- almost certainly the same
+                            # physical event reported in more than one step (a
+                            # continuous drink, or something disturbing the
+                            # fountain like lifting the water container off),
+                            # not a second separate drink. Skip logging it again.
+                            _LOGGER.debug("Skipped duplicate drink log (%.0fg, %dms after last) for %s...",
+                                          grams, now_ms - last_ms, serial[:6])
+                        else:
+                            _state[serial]["_last_drink_log_ms"] = now_ms
+                            _storage.record_intake(serial, grams)
+                            _storage.log_fountain_event(serial, "drink", grams=grams)
+                            _storage.save_device(serial, {"last_drink_ts": int(_time.time())})
+                            _LOGGER.debug("Recorded %.0fg drink for %s...", grams, serial[:6])
                     except Exception:
                         _LOGGER.exception("Failed to record intake for %s...", serial[:6])
             asyncio.ensure_future(_persist_state_cache(serial))
@@ -883,6 +965,29 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
             pass
 
 
+def _local_hhmm_to_utc(hhmm: str) -> str:
+    """Converts an "HH:MM" local-time string to "HH:MM" UTC, using the same
+    feeder_timezone setting the feeding-schedule editor uses. Mirrors
+    util.js's _localToUtc so the fountain light schedule is entered and
+    displayed in local time but sent to the device in UTC, same as the
+    feeder's feeding plan times."""
+    import datetime as _dt
+    import storage as _storage
+    tz_name = _storage.get_settings().get("feeder_timezone", "")
+    offset_hours = 0.0
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            now = _dt.datetime.now(_dt.timezone.utc)
+            offset = now.astimezone(_ZI(tz_name)).utcoffset()
+            offset_hours = (offset or _dt.timedelta()).total_seconds() / 3600
+        except Exception:
+            offset_hours = 0.0
+    h, m = (int(x) for x in hhmm.split(":"))
+    mins = (h * 60 + m - round(offset_hours * 60)) % 1440
+    return f"{mins // 60:02d}:{mins % 60:02d}"
+
+
 def _format_local_time(ts_ms: int) -> str:
     import datetime as _dt
     import storage as _storage
@@ -906,11 +1011,23 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
     (amount + duration + tag(s)) in one event instead of separate NEAR/LEAVE
     messages."""
     try:
+        import time as _time
         import storage as _storage
         min_grams = _storage.get_devices().get(serial, {}).get("min_drink_grams", 5)
         grams = data.get("fluctuatingWeight")
         if grams is None or not (min_grams <= grams <= 800):
             return
+
+        now_ms = int(_time.time() * 1000)
+        last_ms = _state.get(serial, {}).get("_last_drink_log_ms")
+        if last_ms and (now_ms - last_ms) < FOUNTAIN_DRINK_DEDUP_SECS * 1000:
+            # Same reasoning as the plain fountain's weight-drop path: a
+            # second qualifying report this soon after one we just logged is
+            # almost certainly the same event, not a second drink.
+            _LOGGER.debug("Skipped duplicate RFID drink log (%.0fg, %dms after last) for %s...",
+                          grams, now_ms - last_ms, serial[:6])
+            return
+        _state.setdefault(serial, {})["_last_drink_log_ms"] = now_ms
 
         rfids = data.get("rfids") or []
         tag = None
@@ -942,6 +1059,7 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
             extra["pet_id"] = pet_id
         _storage.record_intake(serial, grams)
         _storage.log_fountain_event(serial, "drink", grams=grams, extra=extra)
+        _storage.save_device(serial, {"last_drink_ts": int(_time.time())})
 
         if pet_id and tag:
             try:
@@ -956,7 +1074,6 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
                     "notify_email":  pet_cfg.get("notify_email", True),
                     "notify_mobile": pet_cfg.get("notify_mobile", False),
                 }
-                import time as _time
                 notif_id = f"petlibro_local_{(pet_id or serial)[:8]}_drink_{int(_time.time())}"
                 await _notif.fire_notification(title, msg, _storage.get_settings(), notify_cfg,
                                                notification_id=notif_id)
@@ -1051,17 +1168,7 @@ async def _offline_watchdog():
                     continue
                 if now - _last_attr_poll.get(serial, 0) < ATTR_POLL_INTERVAL_SECS:
                     continue
-                _last_attr_poll[serial] = now
-                try:
-                    svc_topic = _service_sub_topic(device_type, serial)
-                    payload = json.dumps({
-                        "cmd":   "ATTR_GET_SERVICE",
-                        "ts":    int(now * 1000),
-                        "msgId": f"{serial}_poll{int(now)}",
-                    })
-                    await _client_ref.publish(svc_topic, payload)
-                except Exception:
-                    _LOGGER.exception("Periodic ATTR_GET_SERVICE failed for %s...", serial[:6])
+                await _poll_attr_state(serial, device_type)
 
         # Per-pet hasn't-eaten check
         try:

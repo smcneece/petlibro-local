@@ -203,7 +203,6 @@ function buildOverviewTab(device) {
           <input type="checkbox" id="feeder-child-lock" ${childLock ? "checked" : ""}> ${t("overview.child_lock")}
         </label>
       </div>
-      <button class="btn-secondary" id="btn-save-feeder-settings" style="width:100%;margin-top:10px">${t("overview.save_settings")}</button>
     </div>
     <div style="margin-top:16px">
       <div class="tab-section-heading">${t("overview.led_display")}</div>
@@ -237,6 +236,26 @@ function buildOverviewTab(device) {
   </div>${petIntakeHtml}`;
 }
 
+// Polls /api/devices for a scale-calibration ack newer than sentAt, up to
+// ~6s. Returns "container" (code 3007 -- water container still on the
+// scale), "ok" (a response carrying the "zero_standar" baseline msg), or
+// "unknown" if nothing definitive showed up in the window.
+async function _pollCalibrationResult(serial, sentAt) {
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const list = await api("GET", "/api/devices");
+      const dev = list.find(x => x.serial === serial);
+      const cal = dev && dev._scale_calibration;
+      if (cal && cal.ts >= sentAt - 2000) {
+        if (cal.code === 3007) return "container";
+        if ((cal.msg || "").includes("zero_standar")) return "ok";
+      }
+    } catch(e) {}
+  }
+  return "unknown";
+}
+
 // ── Controls tab (fountains) ──────────────────────────────────────────────
 function buildControlsTab(device) {
   const pumpOn = !device.waterStopSwitch;
@@ -245,6 +264,8 @@ function buildControlsTab(device) {
   const waterType = device.useWaterType ?? 0;
   const waterInterval = device.useWaterInterval ?? 15;
   const waterDuration = device.useWaterDuration ?? 15;
+  const lightStart = device.light_start_time || "08:00";
+  const lightEnd = device.light_end_time || "20:00";
   return `
   <div class="toggle-list">
     <div class="toggle-row">
@@ -260,6 +281,7 @@ function buildControlsTab(device) {
       <button class="toggle-switch ${filterLedOn ? "sw-on" : "sw-off"}" id="ctrl-filter-led"></button>
     </div>
   </div>
+  <p class="form-hint">${t("overview.filter_indicator_hint")}</p>
   <div class="form-row">
     <label class="form-label">${t("overview.flow_mode")}</label>
     <select class="form-select" id="ctrl-water-type">
@@ -278,7 +300,21 @@ function buildControlsTab(device) {
       <input class="form-input" id="ctrl-water-interval" type="number" min="1" max="120" value="${waterInterval}">
     </div>
     <button class="btn-primary" id="btn-apply-schedule">${t("overview.apply_schedule")}</button>
-  </div>`;
+  </div>
+  <div class="tab-section-heading" style="margin-top:18px">${t("overview.light_schedule")}</div>
+  <div class="form-row">
+    <label class="form-label">${t("overview.light_start")}</label>
+    <input class="form-input" id="ctrl-light-start" type="time" value="${lightStart}">
+  </div>
+  <div class="form-row">
+    <label class="form-label">${t("overview.light_end")}</label>
+    <input class="form-input" id="ctrl-light-end" type="time" value="${lightEnd}">
+  </div>
+  <button class="btn-primary" id="btn-apply-light-schedule">${t("overview.apply_light_schedule")}</button>
+
+  <div class="tab-section-heading" style="margin-top:18px">${t("overview.calibrate_scale")}</div>
+  <button class="btn-secondary" id="btn-calibrate-scale">${t("overview.calibrate_scale")}</button>
+  <p class="form-hint">${t("overview.calibrate_scale_hint")}</p>`;
 }
 
 // ── Maintenance tab ───────────────────────────────────────────────────────
@@ -391,15 +427,13 @@ function buildMaintenanceTab(device) {
     <label class="form-label">${t("maint.low_water_threshold", {unit: escHtml(lowWaterUnit)})}</label>
     <input class="form-input" id="maint-low-water" type="number" min="0" value="${lowWaterDisplay}">
   </div>
-  <button class="btn-secondary" id="btn-save-low-water" style="width:100%">${t("maint.save_threshold")}</button>
 
   <div class="tab-section-heading">${t("maint.drink_detection")}</div>
   <div class="form-row">
     <label class="form-label">${t("maint.min_drink_label")}</label>
     <input class="form-input" id="maint-min-drink" type="number" min="1" max="200" value="${device.min_drink_grams ?? 5}">
   </div>
-  <p class="form-hint">${t("maint.min_drink_hint")}</p>
-  <button class="btn-secondary" id="btn-save-min-drink" style="width:100%">${t("maint.save_threshold")}</button>`;
+  <p class="form-hint">${t("maint.min_drink_hint")}</p>`;
 }
 
 // ── Custom feed sounds (feeder maintenance tab) ────────────────────────────
@@ -837,6 +871,8 @@ function wireDeviceTabHandlers(tabName) {
     const waterType = document.getElementById("ctrl-water-type");
     const intermittent = document.getElementById("intermittent-settings");
     const applySchedule = document.getElementById("btn-apply-schedule");
+    const applyLightSchedule = document.getElementById("btn-apply-light-schedule");
+    const calibrateScale = document.getElementById("btn-calibrate-scale");
 
     if (pump) pump.onclick = () => togglePump(d);
     if (light) light.onclick = () => toggleLight(d);
@@ -864,6 +900,37 @@ function wireDeviceTabHandlers(tabName) {
           applySchedule.textContent = t("overview.applied");
           setTimeout(() => { applySchedule.textContent = t("overview.apply_schedule"); }, 1500);
         } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
+      };
+    }
+    if (applyLightSchedule) {
+      applyLightSchedule.onclick = async () => {
+        const start = document.getElementById("ctrl-light-start").value || "08:00";
+        const end = document.getElementById("ctrl-light-end").value || "20:00";
+        try {
+          await api("POST", `/api/devices/${d.serial}/command`, { _light_schedule: { start, end } });
+          _patchDevice(d.serial, { light_start_time: start, light_end_time: end });
+          applyLightSchedule.textContent = t("overview.applied");
+          setTimeout(() => { applyLightSchedule.textContent = t("overview.apply_light_schedule"); }, 1500);
+        } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
+      };
+    }
+    if (calibrateScale) {
+      calibrateScale.onclick = async () => {
+        const orig = calibrateScale.textContent;
+        calibrateScale.textContent = t("overview.calibrating");
+        calibrateScale.disabled = true;
+        const sentAt = Date.now();
+        try {
+          await api("POST", `/api/devices/${d.serial}/command`, { cmd: "WEIGHT_CLR_SERVICE", threshold: 550 });
+          const result = await _pollCalibrationResult(d.serial, sentAt);
+          calibrateScale.textContent =
+            result === "container" ? t("overview.calibrate_scale_container") :
+            result === "ok"        ? t("overview.calibrate_scale_done") :
+                                      t("overview.sent");
+        } catch(e) {
+          calibrateScale.textContent = t("overview.failed");
+        }
+        setTimeout(() => { calibrateScale.textContent = orig; calibrateScale.disabled = false; }, 3500);
       };
     }
   }
@@ -926,32 +993,33 @@ function wireDeviceTabHandlers(tabName) {
         setTimeout(() => { closeLid.textContent = orig; closeLid.disabled = false; }, 2000);
       };
     }
-    const saveFeederSettings = document.getElementById("btn-save-feeder-settings");
-    if (saveFeederSettings) {
-      saveFeederSettings.onclick = async () => {
-        const openMode   = document.getElementById("feeder-cover-open-mode").value;
-        const closeSpeed = document.getElementById("feeder-cover-close-speed").value;
-        const closeSec   = Math.min(10, Math.max(1, parseInt(document.getElementById("feeder-close-door-sec").value) || 10));
-        const soundOn    = document.getElementById("feeder-sound-switch").checked;
-        const vol        = parseInt(document.getElementById("feeder-volume").value) || 50;
-        const locked     = document.getElementById("feeder-child-lock").checked;
+    // Each feeder setting auto-saves independently on its own change, rather
+    // than one bundled "Save Settings" button that resent every field
+    // together -- that meant toggling Child Lock also re-sent Sound/Volume
+    // every time, which made the feeder audibly announce "sound setting
+    // saved" for a setting that hadn't actually changed.
+    const feederAutoSave = (elId, getPayload, debounceMs) => {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const send = async () => {
+        const payload = getPayload(el);
         try {
-          await api("POST", `/api/devices/${d.serial}/command`, {
-            coverOpenMode: openMode, coverCloseSpeed: closeSpeed, closeDoorTimeSec: closeSec,
-            soundSwitch: soundOn, volume: vol, childLockSwitch: locked,
-          });
-          _patchDevice(d.serial, {
-            coverOpenMode: openMode, coverCloseSpeed: closeSpeed, closeDoorTimeSec: closeSec,
-            soundSwitch: soundOn, volume: vol, childLockSwitch: locked,
-          });
-          saveFeederSettings.textContent = t("overview.saved");
-        } catch(e) {
-          saveFeederSettings.textContent = t("overview.failed");
-          alert(t("overview.cmd_failed", {error: e.message}));
-        }
-        setTimeout(() => { saveFeederSettings.textContent = t("overview.save_settings"); }, 1500);
+          await api("POST", `/api/devices/${d.serial}/command`, payload);
+          _patchDevice(d.serial, payload);
+        } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
       };
-    }
+      // Debounced fields: a number input's spinner arrows fire onchange on
+      // every single click, so rapid clicking would otherwise send one
+      // command per click -- for volume specifically, that made the feeder
+      // repeatedly announce "sound settings changed" out loud.
+      el.onchange = debounceMs ? _debounce(send, debounceMs) : send;
+    };
+    feederAutoSave("feeder-cover-open-mode",  el => ({ coverOpenMode: el.value }));
+    feederAutoSave("feeder-cover-close-speed", el => ({ coverCloseSpeed: el.value }));
+    feederAutoSave("feeder-close-door-sec",   el => ({ closeDoorTimeSec: Math.min(10, Math.max(1, parseInt(el.value) || 10)) }), 2000);
+    feederAutoSave("feeder-sound-switch",     el => ({ soundSwitch: el.checked }));
+    feederAutoSave("feeder-volume",           el => ({ volume: parseInt(el.value) || 50 }), 2000);
+    feederAutoSave("feeder-child-lock",       el => ({ childLockSwitch: el.checked }));
 
     const sendDisplayText = document.getElementById("btn-send-display-text");
     if (sendDisplayText) {
@@ -1079,9 +1147,57 @@ function wireDeviceTabHandlers(tabName) {
     const audioSelect = document.getElementById("maint-audio-select");
     if (audioSelect) _wireFeedSoundControls(d, audioSelect);
 
+    // Interval/life-days fields auto-save independently of the action
+    // buttons below, so you can update just the interval without it also
+    // claiming the maintenance task was just performed.
+    const filterLifeEl = document.getElementById("maint-filter-life");
+    if (filterLifeEl) {
+      filterLifeEl.onchange = async () => {
+        const lifeDays = parseInt(filterLifeEl.value) || 30;
+        await api("POST", `/api/devices/${d.serial}`, { filter_life_days: lifeDays });
+        _patchDevice(d.serial, { filter_life_days: lifeDays });
+        renderDeviceTab("maintenance");
+      };
+    }
+    const cleanIntervalEl = document.getElementById("maint-clean-interval");
+    if (cleanIntervalEl) {
+      cleanIntervalEl.onchange = async () => {
+        const interval = parseInt(cleanIntervalEl.value) || 30;
+        await api("POST", `/api/devices/${d.serial}`, { cleaning_interval_days: interval });
+        _patchDevice(d.serial, { cleaning_interval_days: interval });
+        renderDeviceTab("maintenance");
+      };
+    }
+    const bowlIntervalEl = document.getElementById("maint-bowl-interval");
+    if (bowlIntervalEl) {
+      bowlIntervalEl.onchange = async () => {
+        const interval = parseInt(bowlIntervalEl.value) || 7;
+        await api("POST", `/api/devices/${d.serial}`, { bowl_cleaning_interval_days: interval });
+        _patchDevice(d.serial, { bowl_cleaning_interval_days: interval });
+        renderDeviceTab("maintenance");
+      };
+    }
+    const housingIntervalEl = document.getElementById("maint-housing-interval");
+    if (housingIntervalEl) {
+      housingIntervalEl.onchange = async () => {
+        const interval = parseInt(housingIntervalEl.value) || 30;
+        await api("POST", `/api/devices/${d.serial}`, { housing_cleaning_interval_days: interval });
+        _patchDevice(d.serial, { housing_cleaning_interval_days: interval });
+        renderDeviceTab("maintenance");
+      };
+    }
+    const desiccantLifeEl = document.getElementById("maint-desiccant-life");
+    if (desiccantLifeEl) {
+      desiccantLifeEl.onchange = async () => {
+        const lifeDays = parseInt(desiccantLifeEl.value) || 14;
+        await api("POST", `/api/devices/${d.serial}`, { desiccant_life_days: lifeDays });
+        _patchDevice(d.serial, { desiccant_life_days: lifeDays });
+        renderDeviceTab("maintenance");
+      };
+    }
+
     const resetFilter = document.getElementById("btn-reset-filter");
     const recordClean = document.getElementById("btn-record-clean");
-    const saveLowWater = document.getElementById("btn-save-low-water");
 
     if (resetFilter) {
       resetFilter.onclick = async () => {
@@ -1112,27 +1228,24 @@ function wireDeviceTabHandlers(tabName) {
         }, 1200);
       };
     }
-    if (saveLowWater) {
-      saveLowWater.onclick = async () => {
-        const inputVal = parseFloat(document.getElementById("maint-low-water").value) || 0;
+    const lowWaterEl = document.getElementById("maint-low-water");
+    if (lowWaterEl) {
+      lowWaterEl.onchange = async () => {
+        const inputVal = parseFloat(lowWaterEl.value) || 0;
         const grams = useImperial() ? Math.round(inputVal / 0.033814) : Math.round(inputVal);
         await api("POST", `/api/devices/${d.serial}`, { low_water_grams: grams });
         try {
           await api("POST", `/api/devices/${d.serial}/command`, { lowWater: grams });
         } catch {}
         _patchDevice(d.serial, { low_water_grams: grams, lowWater: grams });
-        saveLowWater.textContent = t("overview.saved");
-        setTimeout(() => { saveLowWater.textContent = t("maint.save_threshold"); }, 1500);
       };
     }
-    const saveMinDrink = document.getElementById("btn-save-min-drink");
-    if (saveMinDrink) {
-      saveMinDrink.onclick = async () => {
-        const val = Math.max(1, parseInt(document.getElementById("maint-min-drink").value) || 5);
+    const minDrinkEl = document.getElementById("maint-min-drink");
+    if (minDrinkEl) {
+      minDrinkEl.onchange = async () => {
+        const val = Math.max(1, parseInt(minDrinkEl.value) || 5);
         await api("POST", `/api/devices/${d.serial}`, { min_drink_grams: val });
         _patchDevice(d.serial, { min_drink_grams: val });
-        saveMinDrink.textContent = t("overview.saved");
-        setTimeout(() => { saveMinDrink.textContent = t("maint.save_threshold"); }, 1500);
       };
     }
   }

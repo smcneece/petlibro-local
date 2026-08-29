@@ -45,6 +45,7 @@ function renderDevices() {
     lct: d.last_cleaned_ts, lci: d.cleaning_interval_days,
     plans: (d.feeding_plans||[]).map(p=>p.executionTime+"_"+(p._enabled!==false?1:0)).join(),
     dt: d.display_text, din: d.display_icon_name, di: d.display_icon,
+    pets: (d.pets || []).map(p => `${p.id}:${p.image_url}:${p.name}`).join(),
     units: _settings.units, sort: _deviceSort,
   })));
   if (key === _lastDeviceRenderKey) return;
@@ -70,11 +71,18 @@ function renderDevices() {
     const imgHtml = d.image_url
       ? `<img src="${escHtml(d.image_url)}" alt="">`
       : `<div class="card-img-placeholder">${icon}</div>`;
-    const petsHtml = (d.pets || []).slice(0, 3).map(p =>
+    const allPets = d.pets || [];
+    const maxPetSlots = 5;
+    let shownPets = allPets, petOverflow = 0;
+    if (allPets.length > maxPetSlots) {
+      shownPets = allPets.slice(0, maxPetSlots - 1);
+      petOverflow = allPets.length - shownPets.length;
+    }
+    const petsHtml = shownPets.map(p =>
       p.image_url
         ? `<div class="card-pet-avatar"><img src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}"></div>`
         : `<div class="card-pet-avatar">🐾</div>`
-    ).join("");
+    ).join("") + (petOverflow > 0 ? `<div class="card-pet-avatar card-pet-overflow">+${petOverflow}</div>` : "");
     const alerts = deviceAlerts(d);
     const alertDot = alerts.length ? `<div class="card-alert" title="${alerts.join(', ')}">!</div>` : "";
     const intakeHtml = !isFeeder && d.intake_today_grams > 0
