@@ -279,6 +279,7 @@
           <span class="status-badge" id="detail-status-badge"></span>
           <span class="rssi-badge rssi-na" id="detail-rssi" data-i18n="signal.none">No signal</span>
           <span class="fw-badge" id="detail-fw" style="display:none"></span>
+          <span class="fw-badge" id="detail-hw" style="display:none"></span>
           <span class="fw-badge" id="detail-power" style="display:none"></span>
         </div>
       </div>
@@ -641,6 +642,8 @@
     <div>
       <button class="btn-secondary" id="btn-debug-capture" style="width:100%" data-i18n="about.debug_capture">Download Debug Capture</button>
       <p style="font-size:12px;color:var(--pl-subtext);margin-top:8px" data-i18n="about.debug_capture_hint">Downloads a rolling log of recent raw device MQTT traffic, including any device this app doesn't recognize (marked UNRECOGNIZED). Collected continuously in the background, so it also catches devices that only check in occasionally. WiFi name and any local audio server URL are redacted, but this file still includes your device serial numbers, so please email it to github@mega-city.com rather than posting it publicly when reporting an unsupported or misbehaving device.</p>
+      <button class="btn-secondary" id="btn-ntp-log" style="width:100%;margin-top:10px">Download NTP Debug Log (temporary)</button>
+      <p style="font-size:12px;color:var(--pl-subtext);margin-top:8px">Temporary, for an ongoing investigation into delayed feedings. Downloads /data/ntp_debug.log, a dedicated log of NTP time-sync activity. Safe to ignore unless asked to grab this.</p>
     </div>
   </div>
 </div>

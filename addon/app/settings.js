@@ -11,17 +11,32 @@ async function openAbout() {
   }
 }
 
-async function downloadDebugCapture() {
-  const btn = document.getElementById("btn-debug-capture");
+// Has to be fetch(), not a plain navigation/window.open: these endpoints are
+// served through Home Assistant's ingress, and ingress auth is carried by
+// same-document requests but does NOT reliably carry over to a fresh
+// top-level navigation (confirmed -- a plain window.open() attempt here
+// got a 401). So we fetch the file with the page's own credentials, then
+// hand it to the browser via a Blob + synthetic <a download> click.
+//
+// CONFIRMED LIMITATION: the Home Assistant Companion App's built-in
+// browser doesn't support triggering a file save this way at all --
+// no prompt, no file, no error, on both Android and iOS as tested. A
+// same-window navigation to the blob URL was also tried as a fix and made
+// things worse (desktop browsers just displayed the raw text instead of
+// saving it, and it still didn't work on the Companion App either), so
+// that was reverted. Use a regular desktop or mobile browser for these
+// buttons instead of the Companion App until/unless a real fix turns up.
+async function _downloadViaFetch(btnId, path, fallbackFilename) {
+  const btn = document.getElementById(btnId);
   const originalText = btn.textContent;
   btn.disabled = true;
   try {
-    const r = await fetch(`${BASE}/api/diag/debug-capture`);
+    const r = await fetch(`${BASE}${path}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const blob = await r.blob();
     const disposition = r.headers.get("Content-Disposition") || "";
     const match = disposition.match(/filename="?([^"]+)"?/);
-    const filename = match ? match[1] : "petlibro-debug-capture.log";
+    const filename = match ? match[1] : fallbackFilename;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -36,6 +51,14 @@ async function downloadDebugCapture() {
     btn.disabled = false;
     btn.textContent = originalText;
   }
+}
+
+async function downloadDebugCapture() {
+  await _downloadViaFetch("btn-debug-capture", "/api/diag/debug-capture", "petlibro-debug-capture.log");
+}
+
+async function downloadNtpLog() {
+  await _downloadViaFetch("btn-ntp-log", "/api/diag/ntp-log", "ntp-debug.log");
 }
 
 // ── Audio library (Settings → Audio tab) ────────────────────────────────────

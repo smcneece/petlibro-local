@@ -1,7 +1,7 @@
 name: Petlibro Local
 description: Local MQTT control for Petlibro fountains and feeders — no cloud required
 url: https://github.com/smcneece/petlibro-local
-version: "2026.08.8"
+version: "2026.09.1"
 slug: petlibro_local
 init: false
 arch:

@@ -26,6 +26,14 @@ function openDeviceModal(device) {
     fwEl.style.display = "none";
   }
 
+  const hwEl = document.getElementById("detail-hw");
+  if (device.hardwareVersion) {
+    hwEl.textContent = `hw: ${device.hardwareVersion}`;
+    hwEl.style.display = "";
+  } else {
+    hwEl.style.display = "none";
+  }
+
   const powerEl = document.getElementById("detail-power");
   if (device.device_type === "one_rfid" && device.electricQuantity != null && device.electricQuantity > 0) {
     const onAC = device.powerType !== 2;

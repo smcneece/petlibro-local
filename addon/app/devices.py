@@ -30,6 +30,28 @@ WATCHDOG_SECS = 300  # mark offline after 5 min of silence
 ATTR_POLL_INTERVAL_SECS = 300  # re-query full attribute state periodically, not just at connect
 FOUNTAIN_DRINK_DEDUP_SECS = 15  # ignore a second qualifying weight-drop this soon after the last logged one
 
+# EXPERIMENTAL, temporarily OFF (2026-09-01): proactively pushing an
+# unsolicited time sync to every device (see _push_ntp_sync). Turned off
+# while investigating issue #5, so a device's own natural NTP-request
+# behavior (or lack of it) can actually be observed instead of being masked
+# by our own pushes keeping its clock in sync regardless. Flip back to True
+# once that observation window is done.
+ENABLE_PROACTIVE_NTP_PUSH = False
+
+# Dedicated log file for NTP request/response/push activity, separate from
+# the main add-on log, so a multi-day observation window (see issue #5)
+# doesn't require scrolling a huge combined log to find these lines.
+_NTP_LOG_FILE = "/data/ntp_debug.log"
+_ntp_logger = logging.getLogger("petlibro_local.ntp")
+_ntp_logger.setLevel(logging.INFO)
+_ntp_logger.propagate = False
+try:
+    _ntp_handler = logging.FileHandler(_NTP_LOG_FILE)
+    _ntp_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    _ntp_logger.addHandler(_ntp_handler)
+except Exception:
+    _LOGGER.exception("Could not open dedicated NTP log file %s", _NTP_LOG_FILE)
+
 # Rolling capture of raw dl/ traffic for diagnostics (Help/About "Download
 # Debug Capture"). Devices only chirp occasionally, so this is passive and
 # always-on rather than a fixed listen window that could easily miss a device
@@ -137,6 +159,12 @@ def _mark_online(serial: str):
                 # shaves the "just added/reconnected, no readings yet" gap
                 # a new device would otherwise sit in.
                 asyncio.ensure_future(_poll_attr_state(serial, device_type))
+                # Also push a fresh time sync right on reconnect -- see
+                # _push_ntp_sync's docstring for why. Not feeder-specific:
+                # fountains have their own schedule-dependent behavior too
+                # (the light schedule, and cordless models' run schedule),
+                # so any device type benefits from an accurate clock.
+                asyncio.ensure_future(_push_ntp_sync(serial, device_type))
 
 
 def _mark_offline(serial: str):
@@ -626,7 +654,10 @@ def _handle_message(serial: str, topic_str: str, raw: str):
     cmd = data.get("cmd")
 
     if cmd == "NTP":
+        _LOGGER.info("NTP request from %s...", serial[:6])
+        _ntp_logger.info("REQUEST from %s...", serial[:6])
         asyncio.ensure_future(_respond_ntp(topic_str))
+        _mark_online(serial)
         return
 
     if cmd == "GET_FEEDING_PLAN_EVENT":
@@ -835,10 +866,26 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         return
 
     if cmd == "DEVICE_START_EVENT":
-        # Feeder just booted — ack it.
+        # Device just booted. This is the only event we've ever seen carry
+        # softwareVersion/hardwareVersion, and until now nothing actually
+        # stored them anywhere, so whatever version a modal showed was
+        # either blank or a stale value resurrected from the on-disk cache
+        # from whenever it first got lucky and captured one, never refreshed.
+        version_changed = False
+        for key in ("softwareVersion", "hardwareVersion"):
+            if key in data and _state.get(serial, {}).get(key) != data[key]:
+                _state.setdefault(serial, {})[key] = data[key]
+                version_changed = True
+        if version_changed:
+            # Also refresh HA's own Device Info panel (sw_version/hw_version
+            # live in the discovery device block, not just a sensor state),
+            # otherwise it'd stay stuck on whatever discovery last published
+            # at add-on startup even though the sensors themselves update fine.
+            asyncio.ensure_future(republish_ha_discovery(serial))
         asyncio.ensure_future(_ack_device_start(serial, topic_str, data))
         _mark_online(serial)
         asyncio.ensure_future(_check_and_fire_alerts(serial))
+        asyncio.ensure_future(_publish_ha_state(serial))
         return
 
     if cmd == "HEARTBEAT":
@@ -1102,17 +1149,13 @@ async def _ack_device_start(serial: str, event_topic: str, data: dict) -> None:
         pass
 
 
-async def _respond_ntp(request_topic: str) -> None:
+def _build_ntp_payload() -> tuple[str, int]:
     # NOTE: the timezone field here does NOT affect when scheduled plans fire.
     # executionTime in plans is always UTC (the PetLibro app converts local→UTC
     # before sending). This timezone is only used by the feeder for on-device
     # clock display. It is configurable in Settings → General → Feeder Timezone.
     import time as _time
     import storage as _storage
-    global _client_ref
-    if _client_ref is None:
-        return
-    response_topic = request_topic.replace("/post", "/sub")
     settings = _storage.get_settings()
     tz_name = settings.get("feeder_timezone", "") or os.environ.get("TZ", "")
     tz = settings.get("feeder_tz_offset", -7)
@@ -1123,17 +1166,63 @@ async def _respond_ntp(request_topic: str) -> None:
             tz = int(_dt.datetime.now(_ZI(tz_name)).utcoffset().total_seconds() / 3600)
         except Exception:
             pass
+    now_ms = int(_time.time() * 1000)
     payload = json.dumps({
         "cmd":            "NTP",
-        "ts":             int(_time.time() * 1000),
+        "ts":             now_ms,
         "code":           0,
         "calibrationTag": True,
         "timezone":       tz,
     })
+    return payload, now_ms
+
+
+async def _respond_ntp(request_topic: str) -> None:
+    global _client_ref
+    if _client_ref is None:
+        return
+    response_topic = request_topic.replace("/post", "/sub")
+    payload, now_ms = _build_ntp_payload()
+    parts = request_topic.split("/")
+    serial = parts[2] if len(parts) > 2 else "?"
     try:
         await _client_ref.publish(response_topic, payload)
+        _LOGGER.info("NTP response sent: ts=%s", now_ms)
+        _ntp_logger.info("RESPONSE to %s...: ts=%s", serial[:6], now_ms)
     except Exception:
-        pass
+        _LOGGER.exception("Failed to send NTP response")
+        _ntp_logger.exception("RESPONSE to %s... FAILED", serial[:6])
+
+
+async def _push_ntp_sync(serial: str, device_type: str) -> None:
+    """Proactively pushes a time sync instead of waiting for the device to
+    ask for one. Added because a real debug capture (issue #5, a delayed
+    scheduled feeding) showed the feeder going 40+ minutes of continuous
+    activity -- heartbeats, RFID events, door events -- without ever
+    requesting an NTP sync on its own, suggesting it may only sync at boot
+    and just drift afterward. Applied to every device type, not just the
+    feeder: fountains have their own schedule-dependent behavior too (the
+    light schedule, and cordless models' run schedule), so an inaccurate
+    clock could cause the same kind of drift there. EXPERIMENTAL: this
+    sends the same NTP payload a device would normally get in response to
+    its own request, but unprompted, on the same service/sub topic it
+    already accepts other unsolicited commands (manual feed, door open,
+    etc) on. Not confirmed that any of these devices' firmware actually
+    applies a sync it didn't ask for."""
+    if not ENABLE_PROACTIVE_NTP_PUSH:
+        return
+    global _client_ref
+    if _client_ref is None:
+        return
+    topic = _service_sub_topic(device_type, serial)
+    payload, now_ms = _build_ntp_payload()
+    try:
+        await _client_ref.publish(topic, payload)
+        _LOGGER.info("Pushed unsolicited NTP sync to %s...: ts=%s", serial[:6], now_ms)
+        _ntp_logger.info("PROACTIVE PUSH to %s...: ts=%s", serial[:6], now_ms)
+    except Exception:
+        _LOGGER.exception("Failed to push NTP sync to %s...", serial[:6])
+        _ntp_logger.exception("PROACTIVE PUSH to %s... FAILED", serial[:6])
 
 
 # ── Offline watchdog ───────────────────────────────────────────────────────
@@ -1169,6 +1258,7 @@ async def _offline_watchdog():
                 if now - _last_attr_poll.get(serial, 0) < ATTR_POLL_INTERVAL_SECS:
                     continue
                 await _poll_attr_state(serial, device_type)
+                await _push_ntp_sync(serial, device_type)
 
         # Per-pet hasn't-eaten check
         try:

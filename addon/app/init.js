@@ -162,6 +162,7 @@ async function detectLanguage(availableLangs) {
     document.getElementById("modal-about").classList.remove("open");
   });
   document.getElementById("btn-debug-capture").addEventListener("click", downloadDebugCapture);
+  document.getElementById("btn-ntp-log").addEventListener("click", downloadNtpLog);
   document.getElementById("btn-pet-save").addEventListener("click", savePet);
 
   // Wire pet photo button → file input → crop modal

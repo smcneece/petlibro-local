@@ -319,6 +319,7 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Next Meal | Sensor | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
 | Firmware Version | Sensor (diagnostic) | Current firmware version string |
+| Hardware Version | Sensor (diagnostic) | Hardware revision string |
 | Signal Strength | Sensor (diagnostic) | WiFi RSSI in dBm |
 
 **Last Fed** updates automatically when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
@@ -335,9 +336,12 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Filter Days Remaining | Sensor (diagnostic) | Days until filter replacement is due |
 | Battery | Sensor | Battery percentage (Cordless model only) |
 | Firmware Version | Sensor (diagnostic) | Current firmware version string |
+| Hardware Version | Sensor (diagnostic) | Hardware revision string |
 | Signal Strength | Sensor (diagnostic) | WiFi RSSI in dBm |
 
 Applies to the Dockstream RFID Smart Fountain as well. That model additionally reports which pet's RFID tag was present during a drink, logged and attributed to that pet in its Recent Activity the same way the One RFID Smart Feeder attributes eating sessions.
+
+**Firmware Version and Hardware Version** only populate after a device sends its boot event, the only time it reports these, so a device that hasn't rebooted since you added it may show blank until its next power cycle or reconnect.
 
 ### Automations and Voice Assistants
 

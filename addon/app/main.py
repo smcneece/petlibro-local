@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "2026.08.8"
+VERSION = "2026.09.1"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -645,6 +645,28 @@ async def handle_api_diag_debug_capture(request):
     )
 
 
+async def handle_api_diag_ntp_log(request):
+    """Diagnostic: return the dedicated NTP request/response/push log
+    (see devices._ntp_logger). Lives at /data/ntp_debug.log inside this
+    add-on's own container, which isn't visible from the Terminal add-on
+    or any other add-on's shell, each add-on gets its own private /data
+    volume, so this is served over HTTP instead. Temporary, for the issue #5
+    investigation, not linked from any permanent UI yet."""
+    import time
+    path = "/data/ntp_debug.log"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            body = f.read()
+    except FileNotFoundError:
+        body = "(no ntp_debug.log yet -- no NTP activity logged since this add-on last started)\n"
+    filename = f"ntp-debug-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    return web.Response(
+        text=body,
+        content_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 async def handle_api_device_intake(request):
     serial = request.match_info["serial"]
     days = min(int(request.query.get("days", 7)), 30)
@@ -879,6 +901,7 @@ def main():
     app.router.add_get("/api/ha-mobile-targets",         handle_api_ha_mobile_targets)
     app.router.add_get("/api/diag/mosquitto",            handle_api_diag_mosquitto)
     app.router.add_get("/api/diag/debug-capture",        handle_api_diag_debug_capture)
+    app.router.add_get("/api/diag/ntp-log",              handle_api_diag_ntp_log)
 
     port = int(os.environ.get("INGRESS_PORT", 8765))
     _LOGGER.info("Starting Petlibro Local on port %d", port)

@@ -81,9 +81,10 @@ def _device_block(serial: str, cfg: dict, state: dict) -> dict:
     }
     if cfg.get("room"):
         block["suggested_area"] = cfg["room"]
-    sw = state.get("softwareVersion") or state.get("hardwareVersion")
-    if sw:
-        block["sw_version"] = sw
+    if state.get("softwareVersion"):
+        block["sw_version"] = state["softwareVersion"]
+    if state.get("hardwareVersion"):
+        block["hw_version"] = state["hardwareVersion"]
     return block
 
 
@@ -123,6 +124,12 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
     entities.append(("sensor", "firmware", _e(serial, "firmware", b, {
         "name":            "Firmware Version",
         "state_topic":     state_topic(serial, "firmware"),
+        "entity_category": "diagnostic",
+    })))
+
+    entities.append(("sensor", "hardware", _e(serial, "hardware", b, {
+        "name":            "Hardware Version",
+        "state_topic":     state_topic(serial, "hardware"),
         "entity_category": "diagnostic",
     })))
 
@@ -392,9 +399,11 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
     if "rssi" in state:
         await client.publish(state_topic(serial, "rssi"), str(state["rssi"]), retain=True)
 
-    fw = state.get("softwareVersion") or state.get("hardwareVersion")
-    if fw:
-        await client.publish(state_topic(serial, "firmware"), str(fw), retain=True)
+    if "softwareVersion" in state:
+        await client.publish(state_topic(serial, "firmware"), str(state["softwareVersion"]), retain=True)
+
+    if "hardwareVersion" in state:
+        await client.publish(state_topic(serial, "hardware"), str(state["hardwareVersion"]), retain=True)
 
     # Fountains
     if device_type in _FOUNTAIN_TYPES:

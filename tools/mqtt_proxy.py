@@ -41,8 +41,18 @@ will also be redirected and will temporarily lose Petlibro Local connectivity.
 Remove the DNS override when done — the device itself can (and should) remain
 blocked from the internet permanently for full local-only operation.
 
+AFTER YOU'RE DONE: point the DNS override back at Petlibro Local and let the
+device reconnect, then go back into Petlibro Local and make (and save) some
+change to that device's feeding schedule, even a trivial one, to force a
+fresh push. While the device was talking to the real cloud during capture,
+the cloud may have changed its stored schedule, and there's no other way to
+be sure the device is running Petlibro Local's schedule again afterward.
+
 PRIVACY: mqtt_proxy.log contains your device's full serial, username, and password
-in plain text. Do not post it publicly or attach it to GitHub issues.
+in plain text. Do not post it publicly or attach it to GitHub issues. If you're
+sending the log to someone for a packet-format issue (not a credential-capture
+issue), you can delete the "username="/"password=" lines first, they aren't
+needed for that and there's no reason to hand them over if they're not required.
 """
 
 import asyncio
