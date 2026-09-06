@@ -26,6 +26,23 @@ async function toggleFilterLed(device) {
   } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
 }
 
+// A first attempt sending just {lightAgingType: 1} alone to disable a
+// schedule failed a live test, the schedule kept firing regardless. A
+// second real proxy capture of the vendor app's own disable action showed
+// why: it never sends lightAgingType alone, always bundled with the stored
+// lightingStartTime/EndTime in the same command. Backend now matches that,
+// and a real live test also caught a third bug (Apply Light Schedule was
+// unconditionally re-enabling this every time, see devices.py). All three
+// fixes together, this is now confirmed working on real hardware.
+async function toggleLightScheduleEnabled(device) {
+  const newVal = device.lightAgingType !== 2;
+  try {
+    await api("POST", `/api/devices/${device.serial}/command`, { _light_schedule_enabled: newVal });
+    _patchDevice(device.serial, { lightAgingType: newVal ? 2 : 1 });
+    renderDeviceTab(_currentDeviceTab);
+  } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
+}
+
 async function deleteDevice(serial) {
   if (!confirm(t("device_modal.delete_confirm"))) return;
   const device = _devices.find(d => d.serial === serial);

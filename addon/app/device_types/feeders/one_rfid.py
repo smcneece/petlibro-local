@@ -13,6 +13,7 @@ ALERT_MESSAGES = {
     "housing_due":   "Feeder housing needs cleaning.",
     "power_battery": "Running on battery power (AC lost).",
     "battery_low":   "Backup battery is low.",
+    "door_jam":      "Food door is jammed, likely something is blocking it from closing.",
 }
 
 DEFAULT_NOTIFICATIONS = {
@@ -21,6 +22,7 @@ DEFAULT_NOTIFICATIONS = {
     "bowl_due":      True,
     "housing_due":   True,
     "power_battery": True,
+    "door_jam":      True,
     # battery_low has no separate on/off toggle -- battery_low_pct == 0 disables it
 }
 
@@ -73,6 +75,14 @@ def compute_alerts(state: dict, cfg: dict, online: bool) -> set:
         pct = state.get("electricQuantity")
         if pct is not None and pct > 0 and pct <= threshold:
             alerts.add("battery_low")
+    if notif.get("door_jam", True):
+        # Set by devices.py when an ERROR_EVENT with errorCode 2032 arrives
+        # (confirmed via a real capture, 2026-09-04, of a pet blocking the
+        # door from closing) and cleared once the door is next confirmed
+        # closed. Only errorCode 2032 has ever been observed -- other codes
+        # may exist and mean something else, not just other jam variants.
+        if state.get("_door_jam_pending"):
+            alerts.add("door_jam")
     return alerts
 
 

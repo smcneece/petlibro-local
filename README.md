@@ -177,6 +177,7 @@ Petlibro Local sends notifications through three channels simultaneously when en
 | Low water | Fountain water level drops below threshold |
 | Filter replacement due | Filter days remaining reaches 3 or fewer |
 | Cleaning overdue | Fountain or bowl cleaning interval exceeded |
+| Food door jammed | One RFID Smart Feeder reports its door couldn't close, usually a pet blocking it |
 
 **Pet activity notifications** fire when an RFID eating session is detected: "Zoey ate for 3m25s at Zoey's Feeder." These use the same notification channels as device alerts and can be enabled or disabled per pet.
 

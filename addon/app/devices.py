@@ -629,14 +629,53 @@ async def handle_ha_command(serial: str, cmd: dict) -> None:
         if start and end:
             import storage as _storage
             _storage.save_device(serial, {"light_start_time": start, "light_end_time": end})
+            # lightingTimes is required for the schedule to actually take
+            # effect, confirmed via a real proxy capture of the vendor app
+            # doing this (2026-09-03): the duration in minutes between start
+            # and end, sent alongside the times in every working schedule
+            # capture. lightAgingType (1=static, 2=scheduled) is ALSO
+            # required, but must preserve whatever the device is already
+            # set to, not unconditionally force 2 here -- an earlier version
+            # did that, which meant applying new times while the schedule
+            # was toggled off silently re-enabled it every time, since this
+            # handler always won regardless of the separate enable/disable
+            # toggle. Defaults to 2 only if we've never seen this device
+            # report a lightAgingType at all (first-ever schedule setup).
+            current_aging_type = _state.get(serial, {}).get("lightAgingType", 2)
             ok = await send_command(serial, {
                 "lightingStartTime": start,
                 "lightingStartTimeUtc": _local_hhmm_to_utc(start),
                 "lightingEndTime": end,
                 "lightingEndTimeUtc": _local_hhmm_to_utc(end),
+                "lightAgingType": current_aging_type,
+                "lightingTimes": _minutes_between(start, end),
             })
             asyncio.ensure_future(_publish_ha_state(serial))
             _LOGGER.info("API Light Schedule %s...: %s", serial[:6], "ok" if ok else "failed")
+    elif "_light_schedule_enabled" in cmd:
+        # lightAgingType is the real schedule on/off flag (1 = static/manual,
+        # 2 = scheduled). A first attempt at the disable direction sent just
+        # {"lightAgingType": 1} alone and a real live test proved it did
+        # nothing, the schedule kept firing regardless. A second real proxy
+        # capture (2026-09-03) of the vendor app's own disable action showed
+        # why: it never sends lightAgingType alone, always bundled with the
+        # stored lightingStartTime/EndTime (both local and UTC) in the same
+        # command, so this resends those too, matching that pattern, instead
+        # of the bare single-field attempt that didn't work.
+        enabled = bool(cmd["_light_schedule_enabled"])
+        import storage as _storage
+        cfg = _storage.get_devices().get(serial, {})
+        start = cfg.get("light_start_time")
+        end = cfg.get("light_end_time")
+        payload = {"lightAgingType": 2 if enabled else 1}
+        if start and end:
+            payload["lightingStartTime"] = start
+            payload["lightingStartTimeUtc"] = _local_hhmm_to_utc(start)
+            payload["lightingEndTime"] = end
+            payload["lightingEndTimeUtc"] = _local_hhmm_to_utc(end)
+        ok = await send_command(serial, payload)
+        asyncio.ensure_future(_publish_ha_state(serial))
+        _LOGGER.info("API Light Schedule Enabled %s...: %s -> %s", serial[:6], enabled, "ok" if ok else "failed")
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -655,7 +694,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
 
     if cmd == "NTP":
         _LOGGER.info("NTP request from %s...", serial[:6])
-        _ntp_logger.info("REQUEST from %s...", serial[:6])
+        _ntp_logger.info("REQUEST from %s... (%s)", serial[:6], _device_name(serial))
         asyncio.ensure_future(_respond_ntp(topic_str))
         _mark_online(serial)
         return
@@ -809,6 +848,21 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         asyncio.ensure_future(_publish_ha_state(serial))
         return
 
+    if cmd == "ERROR_EVENT":
+        # New cmd, first seen 2026-09-04 (issue #7, a jammed food door). Real
+        # capture confirmed errorCode 2032 fires when a pet blocks the door
+        # from closing, timed exactly to a reported jam window, door stayed
+        # open for several minutes after. Only this one code has ever been
+        # observed -- treating it as the door-jam signal for now, but other
+        # error codes may exist and could mean something unrelated.
+        error_code = data.get("errorCode")
+        _LOGGER.info("ERROR_EVENT from %s...: errorCode=%s", serial[:6], error_code)
+        if error_code == 2032:
+            _state.setdefault(serial, {})["_door_jam_pending"] = True
+        _mark_online(serial)
+        asyncio.ensure_future(_check_and_fire_alerts(serial))
+        return
+
     if cmd == "WAREHOUSE_DOOR_EVENT":
         # Feeder door state change (open/close). Track duration to detect feeding sessions.
         import time as _time
@@ -816,6 +870,10 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         if barn is not None:
             prev_barn = _state.get(serial, {}).get("barnDoorState")
             _state.setdefault(serial, {})["barnDoorState"] = barn
+            if not barn:
+                # Door confirmed closed -- clear any pending jam alert so a
+                # future jam can fire again instead of staying stuck "on".
+                _state[serial].pop("_door_jam_pending", None)
             if barn and not prev_barn:
                 _state[serial]["_door_open_ts"] = int(_time.time() * 1000)
             elif not barn and prev_barn:
@@ -1012,6 +1070,25 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
             pass
 
 
+def _device_name(serial: str) -> str:
+    """User-configured device name, for log lines where a truncated serial
+    alone isn't enough to tell devices apart -- multiple devices of the same
+    type commonly share the same first 6 characters."""
+    try:
+        import storage as _storage
+        return _storage.get_devices().get(serial, {}).get("name") or "unnamed"
+    except Exception:
+        return "unknown"
+
+
+def _minutes_between(start_hhmm: str, end_hhmm: str) -> int:
+    """Minutes from start to end, wrapping past midnight if end is earlier
+    in the day than start (e.g. a light schedule that runs overnight)."""
+    sh, sm = (int(x) for x in start_hhmm.split(":"))
+    eh, em = (int(x) for x in end_hhmm.split(":"))
+    return ((eh * 60 + em) - (sh * 60 + sm)) % 1440
+
+
 def _local_hhmm_to_utc(hhmm: str) -> str:
     """Converts an "HH:MM" local-time string to "HH:MM" UTC, using the same
     feeder_timezone setting the feeding-schedule editor uses. Mirrors
@@ -1188,7 +1265,7 @@ async def _respond_ntp(request_topic: str) -> None:
     try:
         await _client_ref.publish(response_topic, payload)
         _LOGGER.info("NTP response sent: ts=%s", now_ms)
-        _ntp_logger.info("RESPONSE to %s...: ts=%s", serial[:6], now_ms)
+        _ntp_logger.info("RESPONSE to %s... (%s): ts=%s", serial[:6], _device_name(serial), now_ms)
     except Exception:
         _LOGGER.exception("Failed to send NTP response")
         _ntp_logger.exception("RESPONSE to %s... FAILED", serial[:6])
@@ -1219,7 +1296,7 @@ async def _push_ntp_sync(serial: str, device_type: str) -> None:
     try:
         await _client_ref.publish(topic, payload)
         _LOGGER.info("Pushed unsolicited NTP sync to %s...: ts=%s", serial[:6], now_ms)
-        _ntp_logger.info("PROACTIVE PUSH to %s...: ts=%s", serial[:6], now_ms)
+        _ntp_logger.info("PROACTIVE PUSH to %s... (%s): ts=%s", serial[:6], _device_name(serial), now_ms)
     except Exception:
         _LOGGER.exception("Failed to push NTP sync to %s...", serial[:6])
         _ntp_logger.exception("PROACTIVE PUSH to %s... FAILED", serial[:6])

@@ -274,6 +274,10 @@ function buildControlsTab(device) {
   const waterDuration = device.useWaterDuration ?? 15;
   const lightStart = device.light_start_time || "08:00";
   const lightEnd = device.light_end_time || "20:00";
+  // lightAgingType 1=static/manual, 2=scheduled. Confirmed working on real
+  // hardware, both directions -- see toggles.js's toggleLightScheduleEnabled
+  // for the history of what it took to get here.
+  const scheduleEnabled = device.lightAgingType === 2;
   return `
   <div class="toggle-list">
     <div class="toggle-row">
@@ -310,6 +314,10 @@ function buildControlsTab(device) {
     <button class="btn-primary" id="btn-apply-schedule">${t("overview.apply_schedule")}</button>
   </div>
   <div class="tab-section-heading" style="margin-top:18px">${t("overview.light_schedule")}</div>
+  <div class="toggle-row">
+    <span class="toggle-label">${t("overview.light_schedule_enabled")}</span>
+    <button class="toggle-switch ${scheduleEnabled ? "sw-on" : "sw-off"}" id="ctrl-light-schedule-enabled"></button>
+  </div>
   <div class="form-row">
     <label class="form-label">${t("overview.light_start")}</label>
     <input class="form-input" id="ctrl-light-start" type="time" value="${lightStart}">
@@ -319,6 +327,7 @@ function buildControlsTab(device) {
     <input class="form-input" id="ctrl-light-end" type="time" value="${lightEnd}">
   </div>
   <button class="btn-primary" id="btn-apply-light-schedule">${t("overview.apply_light_schedule")}</button>
+  <p class="form-hint">${t("overview.light_schedule_enabled_hint")}</p>
 
   <div class="tab-section-heading" style="margin-top:18px">${t("overview.calibrate_scale")}</div>
   <button class="btn-secondary" id="btn-calibrate-scale">${t("overview.calibrate_scale")}</button>
@@ -808,6 +817,7 @@ function buildNotificationsTab(device) {
     { key: "bowl_due",      label: t("notif.bowl_due") },
     { key: "housing_due",   label: t("notif.housing_due") },
     { key: "power_battery", label: t("notif.power_battery") },
+    { key: "door_jam",      label: t("notif.door_jam") },
     { key: "offline",       label: t("notif.offline") },
   ] : [
     { key: "water_low",    label: t("notif.water_low") },
@@ -880,11 +890,13 @@ function wireDeviceTabHandlers(tabName) {
     const intermittent = document.getElementById("intermittent-settings");
     const applySchedule = document.getElementById("btn-apply-schedule");
     const applyLightSchedule = document.getElementById("btn-apply-light-schedule");
+    const lightScheduleEnabled = document.getElementById("ctrl-light-schedule-enabled");
     const calibrateScale = document.getElementById("btn-calibrate-scale");
 
     if (pump) pump.onclick = () => togglePump(d);
     if (light) light.onclick = () => toggleLight(d);
     if (filterLed) filterLed.onclick = () => toggleFilterLed(d);
+    if (lightScheduleEnabled) lightScheduleEnabled.onclick = () => toggleLightScheduleEnabled(d);
     if (waterType) {
       waterType.onchange = async () => {
         const val = parseInt(waterType.value);
@@ -916,6 +928,10 @@ function wireDeviceTabHandlers(tabName) {
         const end = document.getElementById("ctrl-light-end").value || "20:00";
         try {
           await api("POST", `/api/devices/${d.serial}/command`, { _light_schedule: { start, end } });
+          // Not patching lightAgingType here -- applying new times no longer
+          // forces schedule mode on, it preserves whatever the device
+          // already had (see devices.py's _light_schedule handler), so the
+          // toggle's on-screen state shouldn't change just from this.
           _patchDevice(d.serial, { light_start_time: start, light_end_time: end });
           applyLightSchedule.textContent = t("overview.applied");
           setTimeout(() => { applyLightSchedule.textContent = t("overview.apply_light_schedule"); }, 1500);

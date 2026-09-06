@@ -4,6 +4,13 @@ For full release notes and details on each version, see the [GitHub Releases pag
 
 ## Unreleased
 
+## 2026.09.1
+- Fixed the fountain Light Schedule: it never actually took effect. A real proxy capture of the vendor app doing this showed two fields we weren't sending at all, `lightAgingType` (1 = static, 2 = scheduled) and `lightingTimes` (the duration in minutes between the on and off times), without them the device stored the times but stayed in static mode and just ignored them. Both are now sent, and confirmed working on real hardware, on at the start time, off at the end time, on schedule
+- Clarified the Light Schedule field labels to "Lights On At" / "Lights Off At"
+- Re-added the "Enable Schedule" toggle for the above (this took three tries, all confirmed working on real hardware now): the first attempt sent `lightAgingType` alone and a live test proved that does nothing, the schedule kept firing regardless. A second real capture of the vendor app's own on/off action showed why, it always resends the stored schedule times along with `lightAgingType`, never alone, so this now matches that. A third bug turned up while testing that fix: Apply Light Schedule was unconditionally forcing the schedule back on every time regardless of what the toggle showed, so toggling it off and then changing the times immediately re-enabled it again. Apply now preserves whatever on/off state is already set instead of overriding it. "Enable Schedule" is likely the same choice as PetLibro's own "All Day" vs "Schedule" option, not a separate concept
+- The dedicated NTP debug log now also includes each device's configured name, not just its truncated serial. If you own more than one device of the same type, they commonly share the same first 6 characters, making them impossible to tell apart in that log otherwise
+- New: "Food door is jammed" alert for the One RFID Smart Feeder (issue #7). A user-submitted capture caught a real jam (a pet blocking the door from closing) and showed a device error code we'd never seen before, fires and clears automatically once the door is confirmed closed again. Uses the same notification channels as every other device alert, on by default, can be turned off per device
+
 ## 2026.08.9
 - Added logging for the feeder's NTP time-sync request/response, previously silent, so a delayed-feeding report (issue #5) can actually be diagnosed next time instead of guessed at
 - NTP time-sync requests from the feeder now count as activity for the offline watchdog, previously only other message types did, so a feeder that only checks in to ask for a time sync for a while couldn't get incorrectly flagged offline
