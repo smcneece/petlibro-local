@@ -34,8 +34,20 @@ FOUNTAIN_DRINK_DEDUP_SECS = 15  # ignore a second qualifying weight-drop this so
 # unsolicited time sync to every device (see _push_ntp_sync). Turned off
 # while investigating issue #5, so a device's own natural NTP-request
 # behavior (or lack of it) can actually be observed instead of being masked
-# by our own pushes keeping its clock in sync regardless. Flip back to True
-# once that observation window is done.
+# by our own pushes keeping its clock in sync regardless.
+#
+# UPDATE (2026-09-07): the One RFID feeder's natural log settled the
+# question for that device type -- 4 consecutive nights all requested a
+# sync at 23:54:01 local, each interval within a second of exactly 24h00m
+# (86399.6s / 86399.9s / 86400.1s), including a night the owner confirmed
+# had no reboot at all. This disproves the "only syncs at boot, drifts
+# after" theory this feature was built around: the feeder resyncs on a
+# fixed ~24h internal timer on its own, independent of reconnects. Fountains
+# (WF03) haven't shown the same clean pattern yet -- their natural requests
+# so far all line up with confirmed reboots, no repeating same-time-of-day
+# signal, so this isn't settled for that device type. Leaving this OFF for
+# now given the feeder finding; revisit if a fountain-specific time-drift
+# complaint ever comes in.
 ENABLE_PROACTIVE_NTP_PUSH = False
 
 # Dedicated log file for NTP request/response/push activity, separate from
@@ -244,6 +256,30 @@ async def send_command(serial: str, payload: dict) -> bool:
     except Exception:
         _LOGGER.exception("Failed to send command to %s...", serial[:6])
         return False
+
+
+def _granary_settings_bundle(serial: str, overrides: dict) -> dict:
+    """Build a full Granary Smart Feeder settings payload from currently-known
+    state, with one or more fields overridden.
+
+    A real mqtt_proxy.py capture (issue #8, 2026-09-11) showed every ATTR_SET_SERVICE
+    the vendor app sends this device bundles all six of these fields together,
+    volume/audioUrl/enableAudio/lightSwitch/lightAgingType/disableHardwareButton,
+    even when the user only changed one of them in the app. Never observed a
+    lone single-field update, unlike the One RFID feeder where that's already
+    confirmed to work fine. Matching the observed pattern here rather than
+    assuming a partial update also works for this device."""
+    state = _state.get(serial, {})
+    bundle = {
+        "volume":                state.get("volume", 50),
+        "audioUrl":               state.get("audioUrl", ""),
+        "enableAudio":            state.get("enableAudio", False),
+        "lightSwitch":            state.get("lightSwitch", True),
+        "lightAgingType":         state.get("lightAgingType", 1),
+        "disableHardwareButton":  state.get("disableHardwareButton", False),
+    }
+    bundle.update(overrides)
+    return bundle
 
 
 async def send_display(serial: str, display_text: str, display_icon: int) -> bool:
@@ -591,6 +627,10 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         if isinstance(frame, list) and len(frame) in (7, 8):
             ok = await send_display_frame(serial, frame)
             _LOGGER.info("Custom frame sent to %s...: %s", serial[:6], "ok" if ok else "failed")
+    elif "_granary_field" in cmd:
+        bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
+        ok = await send_command(serial, bundle)
+        _LOGGER.info("HA Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -676,6 +716,10 @@ async def handle_ha_command(serial: str, cmd: dict) -> None:
         ok = await send_command(serial, payload)
         asyncio.ensure_future(_publish_ha_state(serial))
         _LOGGER.info("API Light Schedule Enabled %s...: %s -> %s", serial[:6], enabled, "ok" if ok else "failed")
+    elif "_granary_field" in cmd:
+        bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
+        ok = await send_command(serial, bundle)
+        _LOGGER.info("API Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))

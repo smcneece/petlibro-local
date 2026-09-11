@@ -63,7 +63,7 @@ function renderDevices() {
   grid.innerHTML = sorted.map(d => {
     const online = d.online;
     const statusClass = online ? "online" : "offline";
-    const isFeeder = d.device_type === "one_rfid";
+    const isFeeder = d.device_type === "one_rfid" || d.device_type === "granary";
     const water = fmtWater(d.currentWeight ?? null);
     const filterDays = filterDaysRemaining(d);
     const cleanDays = cleaningDaysRemaining(d);
@@ -111,6 +111,7 @@ function renderDevices() {
             <div class="stat-label">${t("card.food")}</div>
             <div class="stat-value${d.surplusGrain === false ? " danger" : " accent"}">${d.surplusGrain === false ? t("food.low") : d.surplusGrain === true ? t("food.ok") : "—"}</div>
           </div>
+          ${d.device_type === "one_rfid" ? `
           <div class="card-stat stat-secondary">
             <div class="stat-label">${t("card.lid")}</div>
             <div class="stat-value${d.barnDoorState === true ? " accent" : ""}">${d.barnDoorState === true ? t("door.open") : d.barnDoorState === false ? t("door.closed") : "—"}</div>
@@ -119,6 +120,12 @@ function renderDevices() {
             <div class="stat-label">${t("card.battery")}</div>
             <div class="stat-value${d.electricQuantity != null && d.electricQuantity > 0 && d.electricQuantity <= (d.battery_low_pct ?? 20) ? " danger" : ""}">${d.electricQuantity != null && d.electricQuantity > 0 ? `${d.electricQuantity}% ${d.powerType === 2 ? t("power.battery") : t("power.ac")}` : (d.powerType === 1 ? t("power.ac") : "—")}</div>
           </div>
+          ` : `
+          <div class="card-stat stat-secondary">
+            <div class="stat-label">${t("card.battery")}</div>
+            <div class="stat-value${d.electricQuantity != null && d.electricQuantity > 0 && d.electricQuantity <= (d.battery_low_pct ?? 20) ? " danger" : ""}">${d.electricQuantity != null && d.electricQuantity > 0 ? `${d.electricQuantity}%` : "—"}</div>
+          </div>
+          `}
           ${(() => { const nm = nextMealLabel(d.feeding_plans); return nm ? `<div class="card-stat"><div class="stat-label">${t("card.next_meal")}</div><div class="stat-value">${escHtml(nm)}</div></div>` : ""; })()}
           ${(() => { if (!d.last_fed_ts) return ""; const lf = new Date(d.last_fed_ts * 1000); const now = new Date(); const diffH = (now - lf) / 3600000; let label; if (diffH < 1) label = t("time.ago_minutes", {n: Math.round(diffH * 60)}); else if (diffH < 24) label = _fmt12h(lf.getHours(), lf.getMinutes()); else label = t(_WDAY_KEYS[lf.getDay()]) + " " + _fmt12h(lf.getHours(), lf.getMinutes()); return `<div class="card-stat"><div class="stat-label">${t("card.last_fed")}</div><div class="stat-value">${escHtml(label)}</div></div>`; })()}
           ${(() => { const lbl = _fmtDisplayLabel(d); if (!lbl) return ""; const short = lbl.length > 9 ? lbl.slice(0, 8) + "…" : lbl; return `<div class="card-stat stat-secondary"><div class="stat-label">${t("card.display")}</div><div class="stat-value" title="${escHtml(lbl)}">${escHtml(short)}</div></div>`; })()}

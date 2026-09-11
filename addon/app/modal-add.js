@@ -55,11 +55,20 @@ async function pollAutoCapture() {
       clearInterval(_countdownTimer);
       const detected = detectFromClientId(s.result.client_id || "");
       document.getElementById("a-serial").value = detected.serial || s.result.client_id || "";
+      const sel = document.getElementById("a-device-type");
       if (detected.device_type) {
-        const sel = document.getElementById("a-device-type");
         for (const opt of sel.options) {
           if (opt.value === detected.device_type) { opt.selected = true; break; }
         }
+        document.getElementById("a-type-warn").style.display = "none";
+      } else {
+        // Unrecognized serial prefix -- leave the placeholder selected rather
+        // than silently defaulting to whatever option happens to be first in
+        // the list, and warn so it's obvious manual selection is needed
+        // (previously this defaulted to Dockstream 2 with no indication at
+        // all, see issue #8).
+        sel.value = "";
+        document.getElementById("a-type-warn").style.display = "";
       }
       const capturedUser = s.result.username || "";
       const capturedPass = s.result.password || "";
@@ -68,10 +77,10 @@ async function pollAutoCapture() {
       document.getElementById("a-cred-user").value = capturedUser;
       document.getElementById("a-cred-pass").value = capturedPass;
       const capturedSerial = detected.serial || s.result.client_id || "";
-      const detectedVariant = detectVariantFromSerial(capturedSerial, detected.device_type || "dockstream2");
-      populateVariantSelect("a-variant", detected.device_type || "dockstream2", detectedVariant);
+      const detectedVariant = detectVariantFromSerial(capturedSerial, detected.device_type || "");
+      populateVariantSelect("a-variant", detected.device_type || "", detectedVariant);
       populateRoomSelect("a-room", "");
-      populatePetSection("a-pet-section", "a-pet-list", "a-pet-optional", detected.device_type || "dockstream2");
+      populatePetSection("a-pet-section", "a-pet-list", "a-pet-optional", detected.device_type || "");
       await api("POST", "/api/capture/reset");
       showAutoStep(2);
     } else if (s.status === "timeout" || s.status === "error") {
@@ -90,6 +99,7 @@ async function finishAutoDevice() {
   const serial = serialEl.value.trim().toUpperCase();
   if (!serial) { alert(t("add_device.err_serial")); return; }
   const typeEl = document.getElementById("a-device-type");
+  if (!typeEl.value) { alert(t("add_device.err_type")); return; }
   const modelOpt = typeEl.options[typeEl.selectedIndex];
   const aVariant = document.getElementById("a-variant").value;
   const body = {

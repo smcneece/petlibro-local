@@ -43,7 +43,7 @@ function openDeviceModal(device) {
     powerEl.style.display = "none";
   }
 
-  const isFeeder = device.device_type === "one_rfid";
+  const isFeeder = device.device_type === "one_rfid" || device.device_type === "granary";
   const isFountain = device.device_type?.startsWith("dockstream");
   document.querySelectorAll(".dtab").forEach(b => {
     b.classList.toggle("active", b.dataset.dtab === "overview");
@@ -67,7 +67,7 @@ function renderDeviceTab(tabName) {
   else if (tabName === "maintenance") content.innerHTML = buildMaintenanceTab(_currentDevice);
   else if (tabName === "log") {
     content.innerHTML = `<p style="color:var(--pl-subtext);padding:16px 0;text-align:center">Loading...</p>`;
-    if (_currentDevice.device_type === "one_rfid") {
+    if (_currentDevice.device_type === "one_rfid" || _currentDevice.device_type === "granary") {
       api("GET", `/api/devices/${_currentDevice.serial}/feeder-log`)
         .then(log => { content.innerHTML = buildFeederLogTab(_currentDevice, log); })
         .catch(() => { content.innerHTML = `<p style="color:var(--pl-danger);padding:16px 0">${t("device_modal.load_failed_log")}</p>`; });
@@ -230,6 +230,59 @@ function buildOverviewTab(device) {
     </div>` : ""}`;
   }
 
+  if (device.device_type === "granary") {
+    // No RFID, no lid on this model (issue #8) -- see device_types/feeders/
+    // granary.py for what's confirmed vs deliberately not built yet.
+    const foodOk     = device.surplusGrain;
+    const foodClass  = foodOk === false ? "danger" : "accent";
+    const foodLabel  = foodOk === false ? t("food.low") : foodOk === true ? t("food.ok") : "—";
+    const hasBattery = device.electricQuantity != null && device.electricQuantity > 0;
+    const lowPct     = device.battery_low_pct ?? 20;
+    const battClass  = hasBattery && device.electricQuantity <= lowPct ? "danger" : "";
+    const battLabel  = hasBattery ? `${device.electricQuantity}%` : "—";
+    const lightOn    = !!device.lightSwitch;
+    const lockOn     = !!device.disableHardwareButton;
+    const volume     = device.volume ?? 50;
+    return `<div class="detail-stats">
+      <div class="detail-stat" style="padding:8px 14px">
+        <div class="detail-stat-label">${t("overview.food_level")}</div>
+        <div class="detail-stat-value ${foodClass}">${foodLabel}</div>
+      </div>
+      <div class="detail-stat" style="padding:8px 14px">
+        <div class="detail-stat-label">${t("overview.battery")}</div>
+        <div class="detail-stat-value ${battClass}">${battLabel}</div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div class="tab-section-heading">${t("overview.controls")}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
+        <select class="form-input" id="feeder-portions" style="width:80px">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+        <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
+      </div>
+    </div>
+    <div class="toggle-list" style="margin-top:16px">
+      <div class="toggle-row">
+        <span class="toggle-label">${t("overview.light")}</span>
+        <button class="toggle-switch ${lightOn ? "sw-on" : "sw-off"}" id="ctrl-granary-light"></button>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">${t("overview.buttons_lock")}</span>
+        <button class="toggle-switch ${lockOn ? "sw-on" : "sw-off"}" id="ctrl-granary-lock"></button>
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:8px">
+      <label class="form-label">${t("overview.volume")}</label>
+      <input class="form-input" id="feeder-granary-volume" type="number" min="0" max="100" value="${volume}">
+    </div>`;
+  }
+
   return `<div class="detail-stats">
     <div class="detail-stat">
       <div class="detail-stat-label">${t("overview.water_level")}</div>
@@ -336,14 +389,30 @@ function buildControlsTab(device) {
 
 // ── Maintenance tab ───────────────────────────────────────────────────────
 function buildMaintenanceTab(device) {
-  if (device.device_type === "one_rfid") {
+  if (device.device_type === "one_rfid" || device.device_type === "granary") {
+    const foodDays = foodRefillDaysRemaining(device);
     const dDays    = desiccantDaysRemaining(device);
     const bowlDays = bowlDaysRemaining(device);
     const housDays = housingDaysRemaining(device);
+    const fdCol = foodDays != null && foodDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
     const dCol  = dDays    != null && dDays    <= 3 ? "var(--pl-danger)" : "var(--pl-accent)";
     const bCol  = bowlDays != null && bowlDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
     const hCol  = housDays != null && housDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
     return `
+    <div class="tab-section-heading">${t("maint.food_tank")}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="font-size:13px;color:var(--pl-subtext);white-space:nowrap">${t("maint.next_refill_in")}</span>
+      <input class="form-input" id="maint-food-refill-days" type="number" min="0" max="365"
+        value="${foodDays != null ? Math.max(0, Math.round(foodDays)) : ""}"
+        placeholder="${foodDays != null ? "" : t("maint.bowl_not_set")}"
+        style="max-width:90px;color:${fdCol}">
+    </div>
+    <label class="form-label">${t("maint.refill_every")}</label>
+    <div style="display:flex;gap:8px;margin-bottom:18px">
+      <input class="form-input" id="maint-food-refill-interval" type="number" min="1" max="365" value="${device.food_refill_interval_days ?? 14}" style="flex:1">
+      <button class="btn-secondary" id="btn-record-food-refill" style="flex-shrink:0">${t("maint.record_food_refill")}</button>
+    </div>
+
     <div class="tab-section-heading">${t("maint.desiccant")}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <span style="font-size:13px;color:var(--pl-subtext);white-space:nowrap">${t("maint.days_remaining")}</span>
@@ -810,15 +879,25 @@ function wireScheduleTabHandlers() {
 // ── Notifications tab ─────────────────────────────────────────────────────
 function buildNotificationsTab(device) {
   const notif = device.notifications || {};
-  const isFeeder = device.device_type === "one_rfid";
-  const checks = isFeeder ? [
-    { key: "food_low",      label: t("notif.food_low") },
-    { key: "desiccant_due", label: t("notif.desiccant_due") },
+  const isFeeder = device.device_type === "one_rfid" || device.device_type === "granary";
+  const checks = device.device_type === "one_rfid" ? [
+    { key: "food_low",        label: t("notif.food_low") },
+    { key: "food_refill_due", label: t("notif.food_refill_due") },
+    { key: "desiccant_due",   label: t("notif.desiccant_due") },
     { key: "bowl_due",      label: t("notif.bowl_due") },
     { key: "housing_due",   label: t("notif.housing_due") },
     { key: "power_battery", label: t("notif.power_battery") },
     { key: "door_jam",      label: t("notif.door_jam") },
     { key: "offline",       label: t("notif.offline") },
+  ] : device.device_type === "granary" ? [
+    // No door_jam (no lid on this model) and no power_battery (powerType's
+    // meaning isn't confirmed for this device yet, see granary.py)
+    { key: "food_low",        label: t("notif.food_low") },
+    { key: "food_refill_due", label: t("notif.food_refill_due") },
+    { key: "desiccant_due",   label: t("notif.desiccant_due") },
+    { key: "bowl_due",        label: t("notif.bowl_due") },
+    { key: "housing_due",     label: t("notif.housing_due") },
+    { key: "offline",         label: t("notif.offline") },
   ] : [
     { key: "water_low",    label: t("notif.water_low") },
     { key: "filter_due",   label: t("notif.filter_due") },
@@ -1045,6 +1124,37 @@ function wireDeviceTabHandlers(tabName) {
     feederAutoSave("feeder-volume",           el => ({ volume: parseInt(el.value) || 50 }), 2000);
     feederAutoSave("feeder-child-lock",       el => ({ childLockSwitch: el.checked }));
 
+    // Granary Smart Feeder controls -- unlike the RFID feeder above, this
+    // device's real captures showed the vendor app always resending its
+    // full settings bundle together, never a lone changed field (see
+    // _granary_settings_bundle in devices.py), so these go through the
+    // _granary_field/_granary_value flag instead of feederAutoSave's bare
+    // single-field payloads.
+    const granaryToggle = (elId, field) => {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.onclick = async () => {
+        const newVal = !el.classList.contains("sw-on");
+        try {
+          await api("POST", `/api/devices/${d.serial}/command`, { _granary_field: field, _granary_value: newVal });
+          _patchDevice(d.serial, { [field]: newVal });
+          renderDeviceTab("overview");
+        } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
+      };
+    };
+    granaryToggle("ctrl-granary-light", "lightSwitch");
+    granaryToggle("ctrl-granary-lock", "disableHardwareButton");
+    const granaryVolume = document.getElementById("feeder-granary-volume");
+    if (granaryVolume) {
+      granaryVolume.onchange = _debounce(async () => {
+        const vol = parseInt(granaryVolume.value) || 50;
+        try {
+          await api("POST", `/api/devices/${d.serial}/command`, { _granary_field: "volume", _granary_value: vol });
+          _patchDevice(d.serial, { volume: vol });
+        } catch(e) { alert(t("overview.cmd_failed", {error: e.message})); }
+      }, 2000);
+    }
+
     const sendDisplayText = document.getElementById("btn-send-display-text");
     if (sendDisplayText) {
       sendDisplayText.onclick = async () => {
@@ -1078,6 +1188,17 @@ function wireDeviceTabHandlers(tabName) {
     }
 
     // Feeder: editable days-remaining inputs auto-save on change
+    const foodRefillDaysEl = document.getElementById("maint-food-refill-days");
+    if (foodRefillDaysEl) {
+      foodRefillDaysEl.onchange = async () => {
+        const days = parseInt(foodRefillDaysEl.value);
+        if (isNaN(days)) return;
+        const interval = parseInt(document.getElementById("maint-food-refill-interval").value) || 14;
+        const last_ts = _lastTsFromDays(days, interval);
+        await api("POST", `/api/devices/${d.serial}`, { last_food_refill_ts: last_ts, food_refill_interval_days: interval });
+        _patchDevice(d.serial, { last_food_refill_ts: last_ts, food_refill_interval_days: interval });
+      };
+    }
     const desiccantDaysEl = document.getElementById("maint-desiccant-days");
     if (desiccantDaysEl) {
       desiccantDaysEl.onchange = async () => {
@@ -1134,6 +1255,17 @@ function wireDeviceTabHandlers(tabName) {
       };
     }
 
+    const recordFoodRefill = document.getElementById("btn-record-food-refill");
+    if (recordFoodRefill) {
+      recordFoodRefill.onclick = async () => {
+        const interval = parseInt(document.getElementById("maint-food-refill-interval").value) || 14;
+        const now = Date.now();
+        await api("POST", `/api/devices/${d.serial}`, { last_food_refill_ts: now, food_refill_interval_days: interval });
+        _patchDevice(d.serial, { last_food_refill_ts: now, food_refill_interval_days: interval });
+        recordFoodRefill.textContent = t("maint.recorded");
+        setTimeout(() => { recordFoodRefill.textContent = t("maint.record_food_refill"); renderDeviceTab("maintenance"); }, 1200);
+      };
+    }
     const resetDesiccant = document.getElementById("btn-reset-desiccant");
     if (resetDesiccant) {
       resetDesiccant.onclick = async () => {
@@ -1189,6 +1321,15 @@ function wireDeviceTabHandlers(tabName) {
         const interval = parseInt(cleanIntervalEl.value) || 30;
         await api("POST", `/api/devices/${d.serial}`, { cleaning_interval_days: interval });
         _patchDevice(d.serial, { cleaning_interval_days: interval });
+        renderDeviceTab("maintenance");
+      };
+    }
+    const foodRefillIntervalEl = document.getElementById("maint-food-refill-interval");
+    if (foodRefillIntervalEl) {
+      foodRefillIntervalEl.onchange = async () => {
+        const interval = parseInt(foodRefillIntervalEl.value) || 14;
+        await api("POST", `/api/devices/${d.serial}`, { food_refill_interval_days: interval });
+        _patchDevice(d.serial, { food_refill_interval_days: interval });
         renderDeviceTab("maintenance");
       };
     }

@@ -23,6 +23,7 @@ _MODEL_NAMES = {
     "dockstream2_cordless": "Dockstream 2 Cordless Fountain",
     "dockstream_rfid":      "Dockstream RFID Smart Fountain",
     "one_rfid":             "One RFID Smart Feeder",
+    "granary":              "Granary Smart Feeder",
 }
 
 _FOUNTAIN_TYPES = {"dockstream2", "dockstream2_cordless", "dockstream_rfid"}
@@ -43,6 +44,15 @@ _ICON_IDS: dict[int, str] = {v: k for k, v in _ICON_NAMES.items()}
 _CUSTOM_FRAMES: dict[str, list] = {
     "Petlibro Salute": [0, 128 << 7, 128 << 7, 448 << 7, 480 << 7, 224 << 7, 0],
 }
+
+# The Icon Editor's "stock preset" quick-start frames (modal-icon-editor.js's
+# ICON_PRESETS, "Heart (stock)"/"Dog (stock)"/"Cat (stock)"/"Elk (stock)")
+# are send-only, never persisted as a saved custom icon, but sending one
+# still writes its name into display_icon_name so this select's state topic
+# reflects what's actually showing. That name has to be a registered valid
+# option here too, or HA logs "Invalid option for select..." every time one
+# gets sent (a real bug, caught 2026-09-11).
+_STOCK_PRESET_NAMES = ["Heart (stock)", "Dog (stock)", "Cat (stock)", "Elk (stock)"]
 
 
 # ── Topic helpers ──────────────────────────────────────────────────────────
@@ -283,9 +293,72 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "name":          "Display Icon",
             "state_topic":   state_topic(serial, "display_icon"),
             "command_topic": cmd_topic(serial, "display_icon"),
-            "options":       list(_ICON_NAMES.keys()) + (extra_icon_names or []),
+            "options":       list(_ICON_NAMES.keys()) + _STOCK_PRESET_NAMES + (extra_icon_names or []),
             "optimistic":    True,
             "icon":          "mdi:emoticon-outline",
+        })))
+
+    # ── Granary Smart Feeder (no RFID, no lid) ───────────────────────────────
+    elif device_type == "granary":
+        entities.append(("sensor", "battery", _e(serial, "battery", b, {
+            "name":                "Battery",
+            "state_topic":         state_topic(serial, "battery"),
+            "unit_of_measurement": "%",
+            "device_class":        "battery",
+            "state_class":         "measurement",
+        })))
+
+        entities.append(("sensor", "next_meal", _e(serial, "next_meal", b, {
+            "name":         "Next Meal",
+            "state_topic":  state_topic(serial, "next_meal"),
+            "device_class": "timestamp",
+            "icon":         "mdi:clock-outline",
+        })))
+
+        entities.append(("sensor", "desiccant_days", _e(serial, "desiccant_days", b, {
+            "name":                "Desiccant Days Remaining",
+            "state_topic":         state_topic(serial, "desiccant_days"),
+            "unit_of_measurement": "d",
+            "device_class":        "duration",
+            "state_class":         "measurement",
+            "entity_category":     "diagnostic",
+        })))
+
+        entities.append(("button", "feed_now", _e(serial, "feed_now", b, {
+            "name":           "Feed Now",
+            "command_topic":  cmd_topic(serial, "feed_now"),
+            "payload_press":  "PRESS",
+            "icon":           "mdi:food-drumstick",
+        })))
+
+        entities.append(("switch", "light", _e(serial, "light", b, {
+            "name":          "Light",
+            "state_topic":   state_topic(serial, "light"),
+            "command_topic": cmd_topic(serial, "light"),
+            "payload_on":    "ON",
+            "payload_off":   "OFF",
+            "icon":          "mdi:lightbulb",
+        })))
+
+        entities.append(("switch", "buttons_lock", _e(serial, "buttons_lock", b, {
+            "name":            "Buttons Lock",
+            "state_topic":     state_topic(serial, "buttons_lock"),
+            "command_topic":   cmd_topic(serial, "buttons_lock"),
+            "payload_on":      "ON",
+            "payload_off":     "OFF",
+            "icon":            "mdi:lock",
+            "entity_category": "config",
+        })))
+
+        entities.append(("number", "volume", _e(serial, "volume", b, {
+            "name":          "Volume",
+            "state_topic":   state_topic(serial, "volume"),
+            "command_topic": cmd_topic(serial, "volume"),
+            "min":           0,
+            "max":           100,
+            "step":          1,
+            "mode":          "slider",
+            "icon":          "mdi:volume-high",
         })))
 
     return entities
@@ -343,6 +416,11 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
         topics.append(cmd_topic(serial, "volume"))
         topics.append(cmd_topic(serial, "display_text"))
         topics.append(cmd_topic(serial, "display_icon"))
+    elif device_type == "granary":
+        topics.append(cmd_topic(serial, "feed_now"))
+        topics.append(cmd_topic(serial, "volume"))
+        topics.append(cmd_topic(serial, "light"))
+        topics.append(cmd_topic(serial, "buttons_lock"))
     return topics
 
 
@@ -476,6 +554,37 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
         icon_name = cfg.get("display_icon_name") or _ICON_IDS.get(cfg.get("display_icon", 0), "None")
         await client.publish(state_topic(serial, "display_icon"), icon_name, retain=True)
 
+    # Granary Smart Feeder (no RFID, no lid, no display -- see device_types
+    # module docstring for what's deliberately not implemented and why)
+    elif device_type == "granary":
+        if "electricQuantity" in state:
+            await client.publish(state_topic(serial, "battery"), str(state["electricQuantity"]), retain=True)
+
+        if plans is not None:
+            next_ts = _next_meal_ts(plans)
+            await client.publish(state_topic(serial, "next_meal"), next_ts or "", retain=True)
+
+        last_desiccant = cfg.get("last_desiccant_ts")
+        if last_desiccant:
+            life_days = cfg.get("desiccant_life_days", 14)
+            last_desiccant_secs = last_desiccant / 1000
+            elapsed = (time.time() - last_desiccant_secs) / 86400
+            days = max(0, int(life_days - elapsed))
+            await client.publish(state_topic(serial, "desiccant_days"), str(days), retain=True)
+
+        if "volume" in state:
+            await client.publish(state_topic(serial, "volume"), str(state["volume"]), retain=True)
+
+        # lightSwitch/disableHardwareButton are real booleans on this device
+        # (not the 1/0 ints the fountain uses) -- `state["lightSwitch"] == 1`
+        # still works fine either way since Python treats True == 1.
+        if "lightSwitch" in state:
+            val = "ON" if state["lightSwitch"] == 1 else "OFF"
+            await client.publish(state_topic(serial, "light"), val, retain=True)
+
+        if "disableHardwareButton" in state:
+            val = "ON" if state["disableHardwareButton"] else "OFF"
+            await client.publish(state_topic(serial, "buttons_lock"), val, retain=True)
 
 
 def parse_command(topic: str, payload: str, device_type: str = "") -> dict | None:
@@ -494,16 +603,29 @@ def parse_command(topic: str, payload: str, device_type: str = "") -> dict | Non
     if key == "light":
         if device_type == "one_rfid":
             return {"screenDisplaySwitch": payload == "ON"}
+        if device_type == "granary":
+            # Granary's own real ATTR_SET_SERVICE captures always resend its
+            # full settings snapshot together (volume/audioUrl/enableAudio/
+            # lightSwitch/lightAgingType/disableHardwareButton), never a lone
+            # changed field alone -- flagged here so devices.py can build
+            # that same bundle from currently-known state (see
+            # _granary_settings_bundle in devices.py).
+            return {"_granary_field": "lightSwitch", "_granary_value": payload == "ON"}
         return {"lightSwitch": 1 if payload == "ON" else 0}
+    if key == "buttons_lock":
+        return {"_granary_field": "disableHardwareButton", "_granary_value": payload == "ON"}
     if key == "feed_now":
         return {"_feed_now": True}
     if key == "open_door":
         return {"_open_door": True}
     if key == "volume":
         try:
-            return {"volume": int(float(payload))}
+            vol = int(float(payload))
         except (ValueError, TypeError):
             return None
+        if device_type == "granary":
+            return {"_granary_field": "volume", "_granary_value": vol}
+        return {"volume": vol}
     if key == "display_text":
         return {"_display_text": payload[:20]}
     if key == "display_icon":

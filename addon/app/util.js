@@ -63,6 +63,7 @@ const DEVICE_ICONS = {
   dockstream2_cordless: "💧",
   dockstream_rfid: "💧",
   one_rfid: "🐾",
+  granary: "🥣",
 };
 
 const DEVICE_REQUIRES_PET = {
@@ -195,6 +196,12 @@ function desiccantDaysRemaining(d) {
   if (ts == null) return null;
   const due = ts + interval * 86400000;
   return Math.round((due - Date.now()) / 86400000);
+}
+function foodRefillDaysRemaining(d) {
+  const ts = d.last_food_refill_ts;
+  const interval = d.food_refill_interval_days ?? 14;
+  if (ts == null) return null;
+  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function bowlDaysRemaining(d) {
   const ts = d.last_bowl_cleaned_ts;

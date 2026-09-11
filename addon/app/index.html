@@ -414,6 +414,7 @@
       <div id="auto-step-2" style="display:none">
         <div class="capture-success" data-i18n="add_device.captured">✓ Credentials captured!</div>
         <div id="a-login-warn" style="display:none;color:var(--pl-danger);font-size:12px;margin-bottom:8px" data-i18n="add_device.cred_warn">⚠ Could not save credentials to Mosquitto automatically. You may need to add them manually in the Mosquitto broker settings after adding this device.</div>
+        <div id="a-type-warn" style="display:none;color:var(--pl-danger);font-size:12px;margin-bottom:8px" data-i18n="add_device.type_warn">⚠ This serial number wasn't recognized as a supported device. Please select the correct device type manually below, if it's not in the list, this device isn't supported yet, please open a GitHub issue.</div>
         <div class="form-row">
           <label class="form-label" data-i18n="add_device.serial">Serial Number</label>
           <div class="pw-wrap">
@@ -438,10 +439,12 @@
         <div class="form-row">
           <label class="form-label" data-i18n="add_device.device_type">Device Type</label>
           <select class="form-select" id="a-device-type">
+            <option value="" data-i18n="add_device.select_type">Select device type...</option>
             <option value="dockstream2" data-model="WF03">Dockstream 2 Smart Fountain</option>
             <option value="dockstream2_cordless" data-model="WF04">Dockstream 2 Cordless Fountain</option>
             <option value="dockstream_rfid" data-model="WF02">Dockstream RFID Smart Fountain</option>
             <option value="one_rfid" data-model="AF06">One RFID Smart Feeder</option>
+            <option value="granary" data-model="AF01">Granary Smart Feeder</option>
           </select>
         </div>
         <div class="form-row">
@@ -482,6 +485,7 @@
             <option value="dockstream2_cordless" data-model="WF04">Dockstream 2 Cordless Fountain</option>
             <option value="dockstream_rfid" data-model="WF02">Dockstream RFID Smart Fountain</option>
             <option value="one_rfid" data-model="AF06">One RFID Smart Feeder</option>
+            <option value="granary" data-model="AF01">Granary Smart Feeder</option>
           </select>
         </div>
         <div class="form-row">

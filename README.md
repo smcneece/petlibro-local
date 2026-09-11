@@ -39,10 +39,16 @@ If you are not comfortable with these terms, do not use this software.
 |--------|--------------|------------|--------|
 | Dockstream 2 Smart Fountain (black) | WF03...BD... | PLWF106 | Supported |
 | Dockstream 2 Smart Fountain (white) | WF03...BA... | PLWF106 | Supported |
+| Dockstream 2 Smart Fountain (white) | WF01 | PLWF106 | Supported |
 | Dockstream 2 Cordless Fountain (black) | WF04...BD... (inferred) | PLWF116 | Beta |
 | Dockstream 2 Cordless Fountain (white) | WF04...BA... (inferred) | PLWF116 | Beta |
 | Dockstream RFID Smart Fountain | WF02 | PLWF305 | Beta |
 | One RFID Smart Feeder | AF06 | PLAF301 | Supported |
+| Granary Smart Feeder | AF01 | PLAF103 | Beta |
+
+**Granary Smart Feeder:** No RFID and no lid on this model (confirmed via a real MQTT capture, issue #8), so pet-attributed feeding and the "Open Lid"/"Food Door" features don't apply here, only the One RFID Smart Feeder has those. Has an indicator light and a "Buttons Lock" (physical button lock) the One RFID feeder doesn't.
+
+**WF01 units:** Some Dockstream 2 boxes/units are labeled "PLWF105" rather than "PLWF106". A real MQTT capture (issue #8) confirmed a `WF01`-prefixed unit reports `PLWF106` over the wire regardless, so it's treated identically to `WF03`.
 
 **Color variant encoding:** On the Dockstream 2, I think the serial number encodes the color variant. The characters at positions 10–11 appear to indicate color: `BD` = black, `BA` = white. If other owners of the Dockstream 2 fountains could also let me know by opening an issue.
 
@@ -117,7 +123,8 @@ The first time you set up a device, Petlibro Local briefly stops Mosquitto and r
 ### Feeder Monitoring
 - Next meal time pulled from the active feeding schedule and shown on the device card, converted to your local timezone
 - Last Fed time: records whenever a qualifying feeding session is detected. The feeder door opens and closes after at least the configured minimum eating duration (default 30 seconds, adjustable per device)
-- Maintenance reminders: desiccant replacement, bowl cleaning (every 7 days), and housing cleaning (every 30 days), with per-device notification toggles and a dedicated Maintenance tab
+- Maintenance reminders: food tank refill (every 14 days by default), desiccant replacement, bowl cleaning (every 7 days), and housing cleaning (every 30 days), with per-device notification toggles and a dedicated Maintenance tab
+- Food tank refill tracking: press "Filled Food Tank" whenever you top it off, and Petlibro Local tracks days since on a configurable interval, independent of the feeder's own grain sensor (which isn't always reliable)
 - Signal strength (RSSI) and firmware version shown in the device modal header
 - One RFID Smart Feeder backup battery: current charge and AC/battery status shown on the device card, modal header, and Overview tab. Exposed to Home Assistant as a Battery sensor and an "On AC Power" binary sensor. Notifications for "running on battery" (fires when caught before the feeder drops Wi-Fi to save power, since this model appears to disconnect shortly after losing AC) and a configurable low-battery percentage threshold in the Maintenance tab
 
@@ -174,6 +181,7 @@ Petlibro Local sends notifications through three channels simultaneously when en
 | Device offline | No MQTT message received for 5 minutes |
 | Device back online | Device reconnects after being offline |
 | Food level low | Feeder grain sensor reports low |
+| Food tank refill due | Manual refill interval you set has elapsed (backup for the feeder's own low-food sensor, which isn't always reliable) |
 | Low water | Fountain water level drops below threshold |
 | Filter replacement due | Filter days remaining reaches 3 or fewer |
 | Cleaning overdue | Fountain or bowl cleaning interval exceeded |

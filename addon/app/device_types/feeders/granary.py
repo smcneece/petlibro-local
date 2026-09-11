@@ -1,20 +1,45 @@
-"""One RFID Smart Feeder."""
+"""Granary Smart Feeder (no RFID, no lid) -- issue #8, reported by Danny Darbyshire.
 
-DEVICE_TYPES = ["one_rfid"]
+Confirmed via a real mqtt_proxy.py capture (2026-09-11): wire MQTT model is
+literally `PLAF103`, same as the box/retail number this time (no discrepancy
+like the RFID feeder's PLAF103-box-vs-PLAF301-wire case). Command/field names
+mostly reuse the One RFID feeder's protocol (MANUAL_FEEDING_SERVICE,
+FEEDING_PLAN_SERVICE, GET_FEEDING_PLAN_EVENT, surplusGrain, grainOutletState,
+electricQuantity, volume, audioUrl/enableAudio), but this device also has an
+indicator light (lightSwitch/lightAgingType, same fields already confirmed
+for the fountain's light schedule) and a "Buttons Lock" feature
+(disableHardwareButton) instead of the RFID feeder's childLockSwitch.
+
+Confirmed NOT present in this device's capture, deliberately not built here:
+- No barnDoorState / WAREHOUSE_DOOR_EVENT / SWITCH_DOOR_SERVICE -- this is a
+  hopper-style feeder with no openable lid, so no "door_jam" alert either
+  (nothing that could pinch a paw the way a hinged door could).
+- No GRAIN_OUTPUT_EVENT (or equivalent) observed, so "Last Fed" time and any
+  eating-session-style logging aren't implemented -- there's no confirmed
+  event to hook into yet, unlike the RFID feeder's door-open-duration proxy.
+- powerType semantics are NOT assumed to match the RFID feeder's confirmed
+  2=battery/3=AC mapping. This capture only ever showed powerType: 1 (no
+  battery installed, electricQuantity: 0, matching the cloud integration's
+  "Battery/AC %: 0%" reading) -- a value never seen on the RFID feeder. Until
+  a real test confirms what this model's powerType values mean, no
+  power_battery/on_ac_power alert or sensor is built for it, just the plain
+  electricQuantity-based Battery sensor and the existing battery_low_pct
+  threshold (safe either way, since that check already requires pct > 0).
+"""
+
+DEVICE_TYPES = ["granary"]
 
 MQTT_MODELS = {
-    "one_rfid": "PLAF301",
+    "granary": "PLAF103",
 }
 
 ALERT_MESSAGES = {
-    "food_low":         "Food hopper is empty or running low.",
+    "food_low":        "Food hopper is empty or running low.",
     "food_refill_due":  "Food tank hasn't been refilled in a while, may be running low.",
     "desiccant_due":    "Desiccant needs replacing.",
     "bowl_due":         "Food bowl needs cleaning.",
     "housing_due":      "Feeder housing needs cleaning.",
-    "power_battery":    "Running on battery power (AC lost).",
     "battery_low":      "Backup battery is low.",
-    "door_jam":         "Food door is jammed, likely something is blocking it from closing.",
 }
 
 DEFAULT_NOTIFICATIONS = {
@@ -23,8 +48,6 @@ DEFAULT_NOTIFICATIONS = {
     "desiccant_due":   True,
     "bowl_due":        True,
     "housing_due":     True,
-    "power_battery":   True,
-    "door_jam":        True,
     # battery_low has no separate on/off toggle -- battery_low_pct == 0 disables it
 }
 
@@ -38,10 +61,6 @@ def compute_alerts(state: dict, cfg: dict, online: bool) -> set:
         if surplus is not None and not surplus and online:
             alerts.add("food_low")
     if notif.get("food_refill_due", True):
-        # Manual, calendar-based backup for food_low -- the feeder's own
-        # hopper sensor (surplusGrain) is reportedly not always reliable,
-        # so this tracks days since the "Filled Food Tank" button was last
-        # pressed instead, independent of any sensor reading.
         last_ts  = cfg.get("last_food_refill_ts")
         interval = cfg.get("food_refill_interval_days", 14)
         if last_ts is not None:
@@ -69,33 +88,11 @@ def compute_alerts(state: dict, cfg: dict, online: bool) -> set:
             elapsed = (_time.time() - last_ts / 1000) / 86400
             if elapsed >= interval:
                 alerts.add("housing_due")
-    if notif.get("power_battery", True):
-        # Opportunistic: this feeder appears to drop WiFi shortly after
-        # losing AC power to save the battery, so this typically only
-        # catches the single transient state update sent right at the
-        # transition, not a sustained live signal. Real outages mostly show
-        # up as the existing "offline" alert instead.
-        # powerType: 2 = battery, 3 = AC, confirmed via a direct AC-cut
-        # test. 1 has never been observed in any capture. (An io:35 sensor
-        # log was tried as a second, more precise timing source but turned
-        # out to also fire for reasons unrelated to AC loss -- removed.)
-        if state.get("powerType") == 2:
-            alerts.add("power_battery")
-    # Threshold of 0 disables this alert entirely; any other value both
-    # enables it and sets the level, so there's no separate on/off toggle.
     threshold = cfg.get("battery_low_pct", 20)
     if threshold > 0:
         pct = state.get("electricQuantity")
         if pct is not None and pct > 0 and pct <= threshold:
             alerts.add("battery_low")
-    if notif.get("door_jam", True):
-        # Set by devices.py when an ERROR_EVENT with errorCode 2032 arrives
-        # (confirmed via a real capture, 2026-09-04, of a pet blocking the
-        # door from closing) and cleared once the door is next confirmed
-        # closed. Only errorCode 2032 has ever been observed -- other codes
-        # may exist and mean something else, not just other jam variants.
-        if state.get("_door_jam_pending"):
-            alerts.add("door_jam")
     return alerts
 
 

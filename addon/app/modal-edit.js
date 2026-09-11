@@ -166,16 +166,25 @@ const DEVICE_TYPE_MAP = {
   // appearing as "Dockstream 2" in the PetLibro app; a real MQTT capture
   // (GitHub issue #3) later showed this exact serial actually reports
   // PLWF305 (RFID-capable), correcting the earlier assumption.
+  // WF01 (issue #8): box/device label reads "PLWF105", but a real MQTT
+  // capture confirmed it reports PLWF106 over the wire, identical to WF03,
+  // so it's handled as the same dockstream2 device type.
+  "WF01": { device_type: "dockstream2",          model: "WF01" },
   "WF02": { device_type: "dockstream_rfid",      model: "WF02" },
   "WF03": { device_type: "dockstream2",         model: "WF03" },
   "WF04": { device_type: "dockstream2_cordless", model: "WF04" },
   "AF06": { device_type: "one_rfid",             model: "AF06" },
+  // AF01 (issue #8): Granary Smart Feeder, no RFID, no lid. Confirmed via a
+  // real MQTT capture -- wire model is PLAF103, same as the box number this
+  // time (no discrepancy).
+  "AF01": { device_type: "granary",              model: "AF01" },
 };
 const DEVICE_MQTT_MODELS = {
   "dockstream2":          "plwf106",
   "dockstream2_cordless": "plwf116",
   "dockstream_rfid":      "plwf305",
   "one_rfid":             "plaf301",
+  "granary":              "plaf103",
 };
 const DEVICE_VARIANTS = {
   "dockstream2":          [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
@@ -184,6 +193,9 @@ const DEVICE_VARIANTS = {
   // a black option back here if one turns up.
   "dockstream_rfid":      [{ value: "w", label: "White" }],
   "one_rfid":             [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
+  // Danny's own unit (issue #8) is white; black is a real retail color too
+  // (Petlibro sells almost all their devices in both black and white).
+  "granary":              [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
 };
 
 function deviceImageUrl(deviceType, variant) {

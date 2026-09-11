@@ -176,8 +176,15 @@ def _handle_packets(data: bytes, direction: str):
                 except Exception:
                     pretty = payload_str[:200]
 
+                # Log the full topic, not just the trailing channel (e.g.
+                # "service/sub") -- the "dl/{MODEL}/{serial}/device/..."
+                # prefix is exactly where the real MQTT model string lives,
+                # the thing most needed when a capture is for a new/unknown
+                # device type. A real capture (issue #8, Granary Smart
+                # Feeder) lost this entirely because only the trailing
+                # channel used to get logged.
                 channel = topic.split("/device/")[-1] if "/device/" in topic else topic
-                line = f"[{_ts()}] {direction}  {channel}\n{pretty}"
+                line = f"[{_ts()}] {direction}  {topic}\n{pretty}"
                 _log(line)
 
                 if direction == "cloud->device":
