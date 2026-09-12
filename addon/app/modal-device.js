@@ -166,12 +166,12 @@ function buildOverviewTab(device) {
       <div class="tab-section-heading">${t("overview.controls")}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
-        <select class="form-input" id="feeder-portions" style="width:80px">
-          <option value="1" selected>1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5</option>
+        <select class="form-input" id="feeder-portions" style="width:110px">
+          <option value="1" selected>${fmtPortions(1)}</option>
+          <option value="2">${fmtPortions(2)}</option>
+          <option value="3">${fmtPortions(3)}</option>
+          <option value="4">${fmtPortions(4)}</option>
+          <option value="5">${fmtPortions(5)}</option>
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -257,12 +257,12 @@ function buildOverviewTab(device) {
       <div class="tab-section-heading">${t("overview.controls")}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
-        <select class="form-input" id="feeder-portions" style="width:80px">
-          <option value="1" selected>1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5</option>
+        <select class="form-input" id="feeder-portions" style="width:110px">
+          <option value="1" selected>${fmtPortions(1)}</option>
+          <option value="2">${fmtPortions(2)}</option>
+          <option value="3">${fmtPortions(3)}</option>
+          <option value="4">${fmtPortions(4)}</option>
+          <option value="5">${fmtPortions(5)}</option>
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -608,7 +608,7 @@ function buildFeederLogTab(device, entries) {
 
     let line;
     if (e.type === "food_dispensed") {
-      const portions = e.portions === 1 ? t("log.portion_one") : t("log.portions_n", {n: e.portions});
+      const portions = fmtPortions(e.portions);
       line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.food_dispensed", {portions: escHtml(portions)})}`;
     } else if (e.type === "pet_eating") {
       const who = petName ? escHtml(petName) : t("pet.unnamed");
@@ -691,7 +691,7 @@ function buildScheduleTab(plans) {
     const sound = plan.enableAudio ? ` · ${t("schedule.sound_times", {n: plan.audioTimes||1})}` : "";
     return `<div class="sched-row${enabled?"":' disabled'}" data-idx="${i}">
       <div class="sched-time">${escHtml(fmtTime12(_utcToLocal(plan.executionTime||"00:00")))}</div>
-      <div class="sched-meta">${escHtml(dayLabel)} · ${portions === 1 ? t("schedule.portion_one") : t("schedule.portions_n", {n: portions})}${escHtml(sound)}</div>
+      <div class="sched-meta">${escHtml(dayLabel)} · ${escHtml(fmtPortions(portions))}${escHtml(sound)}</div>
       <div class="sched-actions">
         <button class="sched-toggle${enabled?" on":""}" data-idx="${i}" title="${enabled?"Disable":"Enable"}"></button>
         <button class="sched-edit-btn" data-idx="${i}" title="Edit">✏️</button>
@@ -715,7 +715,7 @@ function buildScheduleTab(plans) {
     <div class="form-row">
       <label>${t("schedule.portions")}</label>
       <div class="portion-chips" id="sf-portions">
-        ${[1,2,3,4,5].map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${n}</div>`).join("")}
+        ${[1,2,3,4,5].map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${escHtml(fmtPortions(n))}</div>`).join("")}
       </div>
     </div>
     <div class="form-row" style="display:flex;align-items:center;gap:10px">
@@ -723,7 +723,7 @@ function buildScheduleTab(plans) {
       <label for="sf-sound" style="margin:0;flex-shrink:0">${t("schedule.sound")}</label>
       <span id="sf-sound-times-wrap" style="display:flex;align-items:center;gap:6px;margin-left:6px">
         <label style="margin:0;flex-shrink:0;font-size:12px;color:var(--pl-subtext)">×</label>
-        <input type="number" class="form-input" id="sf-sound-times" value="2" min="1" max="5" style="width:52px;padding:4px 8px">
+        <input type="number" class="form-input" id="sf-sound-times" value="1" min="1" max="5" style="width:52px;padding:4px 8px">
       </span>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px">
@@ -769,7 +769,7 @@ function wireScheduleTabHandlers() {
     const soundOn = plan ? (plan.enableAudio ?? true) : true;
     const soundCheck = document.getElementById("sf-sound");
     soundCheck.checked = soundOn;
-    document.getElementById("sf-sound-times").value = plan?.audioTimes ?? 2;
+    document.getElementById("sf-sound-times").value = plan?.audioTimes ?? 1;
     document.getElementById("sf-sound-times-wrap").style.display = soundOn ? "flex" : "none";
     // Timezone hint
     const tzHint = document.getElementById("sf-tz-hint");
@@ -843,7 +843,7 @@ function wireScheduleTabHandlers() {
     if (repeatDay.length === 0) { alert(t("schedule.err_no_days")); return; }
     const grainNum = +form.querySelector(".portion-chip.on")?.dataset.n || 1;
     const enableAudio = document.getElementById("sf-sound").checked;
-    const audioTimes = +document.getElementById("sf-sound-times").value || 2;
+    const audioTimes = +document.getElementById("sf-sound-times").value || 1;
     const editIdx = document.getElementById("sf-edit-idx").value;
     const planData = {
       planId: editIdx !== "" ? _schedPlans[+editIdx].planId : (5000000 + Math.floor(Math.random() * 1000000)),

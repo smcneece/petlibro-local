@@ -886,8 +886,8 @@
   .day-chips { display: flex; gap: 5px; flex-wrap: wrap; }
   .day-chip { padding: 4px 8px; border-radius: 12px; border: 1px solid var(--pl-border); font-size: 12px; cursor: pointer; background: var(--pl-surface); color: var(--pl-text); user-select: none; }
   .day-chip.on { background: var(--pl-accent); color: #fff; border-color: var(--pl-accent); }
-  .portion-chips { display: flex; gap: 5px; }
-  .portion-chip { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--pl-border); font-size: 14px; font-weight: 600; cursor: pointer; background: var(--pl-surface); color: var(--pl-text); display: flex; align-items: center; justify-content: center; }
+  .portion-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .portion-chip { padding: 4px 10px; border-radius: 12px; border: 1px solid var(--pl-border); font-size: 12px; font-weight: 600; cursor: pointer; background: var(--pl-surface); color: var(--pl-text); user-select: none; }
   .portion-chip.on { background: var(--pl-accent); color: #fff; border-color: var(--pl-accent); }
 
   /* ── LED dot-matrix display widget ── */

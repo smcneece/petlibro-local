@@ -531,7 +531,12 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if plans is not None:
             next_ts = _next_meal_ts(plans)
-            await client.publish(state_topic(serial, "next_meal"), next_ts or "", retain=True)
+            # Empty string is not a valid state for a timestamp-class sensor --
+            # HA logs "Invalid state message" for it (real, confirmed
+            # 2026-09-12). Only publish when there's an actual upcoming feed,
+            # same convention as last_fed/last_drink below.
+            if next_ts:
+                await client.publish(state_topic(serial, "next_meal"), next_ts, retain=True)
 
         last_desiccant = cfg.get("last_desiccant_ts")
         if last_desiccant:
@@ -562,7 +567,12 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if plans is not None:
             next_ts = _next_meal_ts(plans)
-            await client.publish(state_topic(serial, "next_meal"), next_ts or "", retain=True)
+            # Empty string is not a valid state for a timestamp-class sensor --
+            # HA logs "Invalid state message" for it (real, confirmed
+            # 2026-09-12). Only publish when there's an actual upcoming feed,
+            # same convention as last_fed/last_drink below.
+            if next_ts:
+                await client.publish(state_topic(serial, "next_meal"), next_ts, retain=True)
 
         last_desiccant = cfg.get("last_desiccant_ts")
         if last_desiccant:

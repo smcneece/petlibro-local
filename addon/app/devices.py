@@ -1270,31 +1270,119 @@ async def _ack_device_start(serial: str, event_topic: str, data: dict) -> None:
         pass
 
 
+# Cache of computed DST transitions per IANA tz name: {tz_name: (computed_at_epoch_secs, transitions)}.
+# Finding the next two transitions requires a day-by-day scan (see _dst_transitions),
+# cheap individually but not worth redoing on every single NTP request/day -- a
+# transition, once found, stays valid for a long time, so a 6h refresh is plenty.
+_DST_CACHE: dict[str, tuple[float, list]] = {}
+_DST_CACHE_TTL_SECS = 6 * 3600
+
+
+def _tz_utcoffset_at(tz, ts_ms: int):
+    import datetime as _dt
+    dt = _dt.datetime.fromtimestamp(ts_ms / 1000, tz=_dt.timezone.utc).astimezone(tz)
+    return dt.utcoffset()
+
+
+def _dst_transitions(tz_name: str) -> list[tuple[int, int]]:
+    """Find the next two DST transitions for an IANA tz name.
+
+    Returns up to 2 (new_offset_seconds, transition_ts_ms) tuples, soonest first.
+    Empty list for a tz with no DST (or if the name can't be resolved) -- callers
+    should treat that as "can't provide these fields", not "no transition ever".
+    """
+    import time as _time
+    cached = _DST_CACHE.get(tz_name)
+    now = _time.time()
+    if cached and (now - cached[0]) < _DST_CACHE_TTL_SECS:
+        return cached[1]
+
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI(tz_name)
+    except Exception:
+        return []
+
+    transitions: list[tuple[int, int]] = []
+    day_ms = 86_400_000
+    cur_ms = int(now * 1000)
+    cur_offset = _tz_utcoffset_at(tz, cur_ms)
+    end_ms = cur_ms + 730 * day_ms  # search up to 2 years ahead
+    while len(transitions) < 2 and cur_ms < end_ms:
+        next_ms = cur_ms + day_ms
+        next_offset = _tz_utcoffset_at(tz, next_ms)
+        if next_offset != cur_offset:
+            # Binary search within this one day for the exact transition instant.
+            lo, hi = cur_ms, next_ms
+            lo_offset = cur_offset
+            for _ in range(30):  # far more than needed for ms precision over 1 day
+                mid = (lo + hi) // 2
+                if _tz_utcoffset_at(tz, mid) == lo_offset:
+                    lo = mid
+                else:
+                    hi = mid
+            transitions.append((int(next_offset.total_seconds()), hi))
+            cur_offset = next_offset
+        cur_ms = next_ms
+
+    _DST_CACHE[tz_name] = (now, transitions)
+    return transitions
+
+
 def _build_ntp_payload() -> tuple[str, int]:
     # NOTE: the timezone field here does NOT affect when scheduled plans fire.
     # executionTime in plans is always UTC (the PetLibro app converts local→UTC
     # before sending). This timezone is only used by the feeder for on-device
     # clock display. It is configurable in Settings → General → Feeder Timezone.
+    #
+    # timezoneOffsetSeconds/nextDST*/secondNextDST* were added 2026-09-12 to
+    # match the real PetLibro cloud's own NTP response (confirmed via a real
+    # capture, issue #8) -- our response previously only ever sent a bare hour
+    # offset and never these fields at all. A lead for issue #5 (delayed
+    # scheduled feeding): if a feeder's firmware requires this fuller payload
+    # to consider a time sync actually complete, an incomplete response (what
+    # we'd always sent before this) could explain both the unusually frequent
+    # NTP requests seen in a real user's log and clock drift causing scheduled
+    # feeds to fire late. Not proven, but this now matches the real cloud
+    # exactly, removing that gap as a possible explanation either way.
     import time as _time
     import storage as _storage
     settings = _storage.get_settings()
     tz_name = settings.get("feeder_timezone", "") or os.environ.get("TZ", "")
-    tz = settings.get("feeder_tz_offset", -7)
+    tz_offset_secs = None
+    tz_hours = settings.get("feeder_tz_offset", -7)
     if tz_name:
         try:
             import datetime as _dt
             from zoneinfo import ZoneInfo as _ZI
-            tz = int(_dt.datetime.now(_ZI(tz_name)).utcoffset().total_seconds() / 3600)
+            offset = _dt.datetime.now(_ZI(tz_name)).utcoffset()
+            tz_offset_secs = int(offset.total_seconds())
+            tz_hours = int(round(tz_offset_secs / 3600))
         except Exception:
             pass
+
     now_ms = int(_time.time() * 1000)
-    payload = json.dumps({
+    payload_dict = {
         "cmd":            "NTP",
         "ts":             now_ms,
         "code":           0,
         "calibrationTag": True,
-        "timezone":       tz,
-    })
+        "timezone":       tz_hours,
+    }
+    # Only include the fuller DST-aware fields when we have a real IANA zone to
+    # compute them from -- a bare configured hour offset carries no DST rules,
+    # so fabricating "no transition coming" would be a guess, not a fact.
+    if tz_name and tz_offset_secs is not None:
+        transitions = _dst_transitions(tz_name)
+        if transitions:
+            payload_dict["timezoneOffsetSeconds"] = tz_offset_secs
+            payload_dict["nextDSTOffsetSeconds"] = transitions[0][0]
+            payload_dict["nextDSTTransitionTs"] = transitions[0][1]
+            if len(transitions) > 1:
+                payload_dict["secondNextDSTOffsetSeconds"] = transitions[1][0]
+                payload_dict["secondNextDSTTransitionTs"] = transitions[1][1]
+
+    payload = json.dumps(payload_dict)
     return payload, now_ms
 
 
@@ -1309,7 +1397,10 @@ async def _respond_ntp(request_topic: str) -> None:
     try:
         await _client_ref.publish(response_topic, payload)
         _LOGGER.info("NTP response sent: ts=%s", now_ms)
-        _ntp_logger.info("RESPONSE to %s... (%s): ts=%s", serial[:6], _device_name(serial), now_ms)
+        # Full payload logged here (not just ts=) so the new DST-aware fields
+        # (added 2026-09-12) can actually be visually confirmed from the
+        # downloadable NTP debug log alone, no MQTT tooling needed.
+        _ntp_logger.info("RESPONSE to %s... (%s): %s", serial[:6], _device_name(serial), payload)
     except Exception:
         _LOGGER.exception("Failed to send NTP response")
         _ntp_logger.exception("RESPONSE to %s... FAILED", serial[:6])
@@ -1340,7 +1431,7 @@ async def _push_ntp_sync(serial: str, device_type: str) -> None:
     try:
         await _client_ref.publish(topic, payload)
         _LOGGER.info("Pushed unsolicited NTP sync to %s...: ts=%s", serial[:6], now_ms)
-        _ntp_logger.info("PROACTIVE PUSH to %s... (%s): ts=%s", serial[:6], _device_name(serial), now_ms)
+        _ntp_logger.info("PROACTIVE PUSH to %s... (%s): %s", serial[:6], _device_name(serial), payload)
     except Exception:
         _LOGGER.exception("Failed to push NTP sync to %s...", serial[:6])
         _ntp_logger.exception("PROACTIVE PUSH to %s... FAILED", serial[:6])

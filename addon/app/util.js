@@ -92,6 +92,20 @@ function gramsToDisplay(grams) {
   return { value: Math.round(grams).toString(), unit: "ml" };
 }
 
+// 1 portion (grainNum) = 10g = 1/12 cup, confirmed from a community PetLibro
+// HA integration's own conversion constants (2026-09-11), not a guess. This
+// app's protocol only ever sends/receives the plain integer portion count,
+// grams/cups are display-only, computed here.
+function _gcd(a, b) { return b ? _gcd(b, a % b) : a; }
+function fmtPortions(n) {
+  if (useImperial()) {
+    const g = _gcd(n, 12);
+    const num = n / g, den = 12 / g;
+    return den === 1 ? `${num} cup${num === 1 ? "" : "s"}` : `${num}/${den} cup`;
+  }
+  return `${n * 10}g`;
+}
+
 const _DISPLAY_ICONS = { 5: "❤ Heart", 6: "🐕 Dog", 7: "🐱 Cat", 8: "🦌 Elk" };
 const _DISPLAY_ICON_EMOJIS = { 5: "❤️", 6: "🐕", 7: "🐱", 8: "🦌" };
 function _fmtDisplayLabel(d) {

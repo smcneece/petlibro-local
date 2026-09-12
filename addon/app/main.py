@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "2026.09.2"
+VERSION = "2026.09.3"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -535,7 +535,8 @@ async def handle_api_capture_start(request):
             # Give Mosquitto a moment to release port 1883 before the mini broker tries to bind
             await asyncio.sleep(3)
 
-            creds = await mqtt_broker.capture_credentials(timeout_seconds=60)
+            known_serials = frozenset(storage.get_devices().keys())
+            creds = await mqtt_broker.capture_credentials(timeout_seconds=60, known_serials=known_serials)
 
             if creds:
                 _LOGGER.info("Credentials captured for client %s...", creds.get("client_id", "")[:8])

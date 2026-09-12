@@ -100,8 +100,9 @@ def _is_petlibro(client_id: str) -> bool:
 
 
 class _CaptureProtocol(asyncio.Protocol):
-    def __init__(self, result_future: asyncio.Future):
+    def __init__(self, result_future: asyncio.Future, known_serials: frozenset[str] = frozenset()):
         self._future = result_future
+        self._known_serials = known_serials
         self._buf = b""
         self._transport = None
 
@@ -121,27 +122,45 @@ class _CaptureProtocol(asyncio.Protocol):
             self._transport.write(CONNACK_ACCEPTED)
             self._transport.close()
 
-            if _is_petlibro(client_id):
-                _LOGGER.info(
-                    "Capture: Petlibro device — client_id=%s..., user=%s...",
-                    client_id[:8],
-                    creds["username"][:4] if creds["username"] else "?",
-                )
-                if not self._future.done():
-                    self._future.set_result(creds)
-            else:
+            if not _is_petlibro(client_id):
                 _LOGGER.info(
                     "Capture: skipping non-Petlibro client '%s' — still waiting...",
                     client_id[:16],
                 )
+                return
+
+            if client_id.upper() in self._known_serials:
+                # Stopping Mosquitto for this capture window disconnects every
+                # already-configured device too, not just the new one the user
+                # is trying to add, and any of them reconnecting during the
+                # window would otherwise win the capture race. Real complaint
+                # from a user with multiple devices (issue #8, 2026-09-11):
+                # re-adding one device kept re-capturing an already-onboarded
+                # one instead, since it reconnects faster than a freshly
+                # power-cycled new device.
+                _LOGGER.info(
+                    "Capture: skipping already-onboarded device '%s...' — still waiting...",
+                    client_id[:8],
+                )
+                return
+
+            _LOGGER.info(
+                "Capture: Petlibro device — client_id=%s..., user=%s...",
+                client_id[:8],
+                creds["username"][:4] if creds["username"] else "?",
+            )
+            if not self._future.done():
+                self._future.set_result(creds)
 
     def connection_lost(self, exc):
         if exc:
             _LOGGER.debug("Capture: connection lost: %s", exc)
 
 
-async def capture_credentials(timeout_seconds: int = CAPTURE_TIMEOUT) -> dict:
-    """Run a mini MQTT broker on port 1883 and capture the first CONNECT credentials.
+async def capture_credentials(timeout_seconds: int = CAPTURE_TIMEOUT, known_serials=frozenset()) -> dict:
+    """Run a mini MQTT broker on port 1883 and capture the first CONNECT credentials
+    from a device NOT already in known_serials (already-onboarded devices reconnecting
+    during this same window are skipped, not captured).
 
     Retries binding the port every 3 seconds until Mosquitto fully releases it.
     Returns {"client_id": ..., "username": ..., "password": ...} or {} on timeout/error.
@@ -150,12 +169,13 @@ async def capture_credentials(timeout_seconds: int = CAPTURE_TIMEOUT) -> dict:
     result: asyncio.Future = loop.create_future()
     deadline = loop.time() + timeout_seconds
     server = None
+    known_serials = frozenset(s.upper() for s in known_serials)
 
     # Retry until port is free -- Mosquitto can take several seconds to release it
     while loop.time() < deadline:
         try:
             server = await loop.create_server(
-                lambda: _CaptureProtocol(result),
+                lambda: _CaptureProtocol(result, known_serials),
                 host="0.0.0.0",
                 port=CAPTURE_PORT,
             )
