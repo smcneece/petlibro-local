@@ -888,6 +888,7 @@ function buildNotificationsTab(device) {
     { key: "housing_due",   label: t("notif.housing_due") },
     { key: "power_battery", label: t("notif.power_battery") },
     { key: "door_jam",      label: t("notif.door_jam") },
+    { key: "food_dispensed", label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",       label: t("notif.offline") },
   ] : device.device_type === "granary" ? [
     // No door_jam (no lid on this model) and no power_battery (powerType's
@@ -897,6 +898,7 @@ function buildNotificationsTab(device) {
     { key: "desiccant_due",   label: t("notif.desiccant_due") },
     { key: "bowl_due",        label: t("notif.bowl_due") },
     { key: "housing_due",     label: t("notif.housing_due") },
+    { key: "food_dispensed",  label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",         label: t("notif.offline") },
   ] : [
     { key: "water_low",    label: t("notif.water_low") },
@@ -922,7 +924,7 @@ function buildNotificationsTab(device) {
   <div class="toggle-list">
     ${checks.map(c => `<div class="toggle-row">
       <span class="toggle-label">${c.label}</span>
-      <input type="checkbox" class="notif-check" data-key="${c.key}" ${notif[c.key] !== false ? "checked" : ""}>
+      <input type="checkbox" class="notif-check" data-key="${c.key}" ${(c.defaultOn === false ? notif[c.key] === true : notif[c.key] !== false) ? "checked" : ""}>
     </div>`).join("")}${batteryLowRow}
   </div>
   ${isFeeder ? `<p class="form-hint">${t("notif.battery_low_hint")}</p>` : ""}

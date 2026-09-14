@@ -3,6 +3,12 @@
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
 ## Unreleased
+- Feed amounts now show in ounces instead of cup fractions when using imperial units. The OEM PetLibro app itself now shows manual feed amounts in oz rather than cups (confirmed directly, minimum feed amount shown as 0.35oz, an exact match for 10g/portion), so this now matches that instead of showing a fraction of a cup
+- New optional "Food dispensed" notification for the One RFID and Granary feeders, alerts every time food is dispensed (scheduled or manual), through whichever channels you already have enabled for that device. Off by default, since most people don't want a notification for every single feed, useful if you want independent confirmation your feeder is actually dispensing on schedule
+- Download Debug Capture now covers a real rolling 24 hours, previously it was capped at a fixed number of messages, so the actual time span it covered shrank the more devices (or the chattier they were) you had, sometimes just a few hours. The dedicated NTP debug log also now records feeding-plan requests from the feeder, not just time-sync activity
+- Fixed the One RFID Feeder's device card showing a blank battery field ("—") instead of "AC" when no battery is installed. The device modal already showed this correctly, the card was using an older, since-corrected assumption about what the device's power-source field reports
+
+## 2026.09.3
 - Fixed Auto Setup capturing the wrong device when you already have more than one Petlibro device set up. Stopping Mosquitto for the capture window disconnects every already-configured device too, not just the new one, and any of them reconnecting during that window used to win the capture race and get re-captured instead (reported by Danny Darbyshire, issue #8, while re-adding a feeder with a fountain already set up). Auto Setup now skips any device already in your device list and keeps waiting for a genuinely new one
 - Feed amounts (Feed Now, feeding schedules, the activity log) now show as grams or cups instead of a bare "portions" count, which meant nothing without knowing how a portion was defined (also from Danny). 1 portion = 10g = 1/12 cup, confirmed from a community PetLibro Home Assistant integration's own conversion constants, not a guess. Follows your existing Units preference (or auto-detects US vs everywhere else) the same way water measurements already do
 - Default feeding-schedule sound repeat count changed from 2 to 1

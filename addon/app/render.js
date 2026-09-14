@@ -118,7 +118,7 @@ function renderDevices() {
           </div>
           <div class="card-stat stat-secondary">
             <div class="stat-label">${t("card.battery")}</div>
-            <div class="stat-value${d.electricQuantity != null && d.electricQuantity > 0 && d.electricQuantity <= (d.battery_low_pct ?? 20) ? " danger" : ""}">${d.electricQuantity != null && d.electricQuantity > 0 ? `${d.electricQuantity}% ${d.powerType === 2 ? t("power.battery") : t("power.ac")}` : (d.powerType === 1 ? t("power.ac") : "—")}</div>
+            <div class="stat-value${d.electricQuantity != null && d.electricQuantity > 0 && d.electricQuantity <= (d.battery_low_pct ?? 20) ? " danger" : ""}">${d.electricQuantity != null && d.electricQuantity > 0 ? `${d.electricQuantity}% ${d.powerType === 2 ? t("power.battery") : t("power.ac")}` : (d.powerType === 2 ? t("power.battery") : t("power.ac"))}</div>
           </div>
           ` : `
           <div class="card-stat stat-secondary">

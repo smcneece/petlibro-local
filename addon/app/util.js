@@ -92,16 +92,16 @@ function gramsToDisplay(grams) {
   return { value: Math.round(grams).toString(), unit: "ml" };
 }
 
-// 1 portion (grainNum) = 10g = 1/12 cup, confirmed from a community PetLibro
-// HA integration's own conversion constants (2026-09-11), not a guess. This
-// app's protocol only ever sends/receives the plain integer portion count,
-// grams/cups are display-only, computed here.
-function _gcd(a, b) { return b ? _gcd(b, a % b) : a; }
+// 1 portion (grainNum) = 10g, confirmed from a community PetLibro HA
+// integration's own conversion constants (2026-09-11), and directly confirmed
+// against the real OEM app (2026-09-13, minimum feed amount shown as 0.35oz,
+// an exact match for 10g). This app's protocol only ever sends/receives the
+// plain integer portion count, grams/oz are display-only, computed here.
+// Was cup fractions (1/12 cup per portion) until 2026-09-13, switched to oz
+// to match the OEM app's own display, which shows oz rather than cups now.
 function fmtPortions(n) {
   if (useImperial()) {
-    const g = _gcd(n, 12);
-    const num = n / g, den = 12 / g;
-    return den === 1 ? `${num} cup${num === 1 ? "" : "s"}` : `${num}/${den} cup`;
+    return `${(n * 10 / 28.349523125).toFixed(2)}oz`;
   }
   return `${n * 10}g`;
 }

@@ -67,9 +67,18 @@ except Exception:
 # Rolling capture of raw dl/ traffic for diagnostics (Help/About "Download
 # Debug Capture"). Devices only chirp occasionally, so this is passive and
 # always-on rather than a fixed listen window that could easily miss a device
-# that wakes up once every few minutes. Bounded by count, not time.
-_RAW_CAPTURE_MAXLEN = 2000
-_raw_capture: collections.deque = collections.deque(maxlen=_RAW_CAPTURE_MAXLEN)
+# that wakes up once every few minutes. Bounded by a rolling 24h time window
+# (pruned on every append and on read), with a count-based safety cap as a
+# backstop in case something floods traffic and would otherwise grow this
+# buffer unbounded.
+_RAW_CAPTURE_MAX_AGE_SECS = 24 * 3600
+_RAW_CAPTURE_SAFETY_MAXLEN = 50000
+_raw_capture: collections.deque = collections.deque(maxlen=_RAW_CAPTURE_SAFETY_MAXLEN)
+
+
+def _prune_raw_capture(now: float) -> None:
+    while _raw_capture and now - _raw_capture[0]["ts"] > _RAW_CAPTURE_MAX_AGE_SECS:
+        _raw_capture.popleft()
 _unrecognized_serials_seen: set = set()  # dedup so the addon log doesn't spam per-message
 
 _host = "localhost"
@@ -744,6 +753,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         return
 
     if cmd == "GET_FEEDING_PLAN_EVENT":
+        _ntp_logger.info("FEEDING_PLAN REQUEST from %s... (%s)", serial[:6], _device_name(serial))
         asyncio.ensure_future(_respond_feeding_plan(serial, topic_str))
         return
 
@@ -1082,6 +1092,7 @@ async def _respond_feeding_plan(serial: str, request_topic: str) -> None:
     try:
         await _client_ref.publish(response_topic, payload)
         _LOGGER.info("Feeding plan response sent to %s... (%d plans)", serial[:6], len(clean_plans))
+        _ntp_logger.info("FEEDING_PLAN RESPONSE to %s... (%s): %d plans", serial[:6], _device_name(serial), len(clean_plans))
     except Exception:
         pass
 
@@ -1110,6 +1121,17 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
             portions = data["actualGrainNum"]
             _storage.record_intake(serial, portions)
             _storage.log_feeder_event(serial, "food_dispensed", portions=portions)
+            device_cfg = _storage.get_devices().get(serial, {})
+            if device_cfg.get("notifications", {}).get("food_dispensed"):
+                import notifications as _notifications
+                name  = device_cfg.get("name") or serial[:8]
+                msg   = f"Food dispensed — {portions} portion{'s' if portions != 1 else ''} at {name}"
+                title = f"Petlibro Local: {name} — Food dispensed"
+                notif_id = f"petlibro_local_{serial[:8]}_food_dispensed_{int(_time.time())}"
+                asyncio.ensure_future(
+                    _notifications.fire_notification(title, msg, _storage.get_settings(), device_cfg,
+                                                     notification_id=notif_id)
+                )
         except Exception:
             pass
 
@@ -1606,12 +1628,14 @@ async def _mqtt_loop():
                     if parts[0] == "dl" and len(parts) >= 4 and topic_str.endswith("/post"):
                         serial = parts[2]
                         recognized = serial in _devices
+                        _now = _time.time()
                         _raw_capture.append({
-                            "ts":         _time.time(),
+                            "ts":         _now,
                             "topic":      topic_str,
                             "payload":    payload_str,
                             "recognized": recognized,
                         })
+                        _prune_raw_capture(_now)
                         if recognized:
                             _handle_message(serial, topic_str, payload_str)
                         elif serial not in _unrecognized_serials_seen:
@@ -1657,10 +1681,12 @@ async def test_connection(host: str, port: int, user: str, password: str) -> boo
 # ── Debug capture ──────────────────────────────────────────────────────────
 
 def get_raw_capture() -> list[dict]:
-    """Snapshot of the rolling raw dl/ traffic buffer, oldest first. Populated
+    """Snapshot of the rolling 24h raw dl/ traffic buffer, oldest first. Populated
     continuously by _mqtt_loop rather than on demand, since devices only chirp
     occasionally and a fixed listen window could easily miss one. Used by the
     Help/About "Download Debug Capture" button."""
+    import time as _time
+    _prune_raw_capture(_time.time())
     return list(_raw_capture)
 
 
