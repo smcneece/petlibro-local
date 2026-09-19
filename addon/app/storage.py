@@ -61,6 +61,7 @@ ALLOWED_PET_FIELDS = {
     "name", "breed", "weight_kg", "image_url", "device_serials", "rfid_tag",
     "notify_bell", "notify_email", "notify_mobile",
     "no_eat_alert_enabled", "no_eat_alert_hours",
+    "notify_eating_activity",
 }
 
 _DEVICE_DEFAULTS = {

@@ -1,6 +1,7 @@
 """Petlibro Local -- aiohttp web server and main orchestrator."""
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "2026.09.4"
+VERSION = "2026.09.5"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -782,6 +783,7 @@ async def handle_api_feeding_plans_post(request):
         storage.save_device_feeding_plans(serial, plans)
         ok = await devices.send_feeding_plans(serial, plans)
         asyncio.ensure_future(devices.republish_ha_discovery(serial))
+        asyncio.ensure_future(devices.publish_ha_state(serial))
         return web.json_response({"status": "ok", "mqtt": ok})
     except Exception:
         _LOGGER.exception("Feeding plans update failed for %s...", serial[:6])
@@ -847,8 +849,39 @@ async def on_startup(app):
     asyncio.ensure_future(_unsuppress())
 
 
+_INGRESS_NETWORK = ipaddress.ip_network("172.30.32.0/23")
+
+
+@web.middleware
+async def _restrict_api_middleware(request, handler):
+    """Security: /api/* returns MQTT broker credentials (the edit forms need
+    to show/re-save them), so it must never be reachable from outside this
+    container. Confirmed via live diagnostic logging (2026-09-15) that Home
+    Assistant Supervisor's ingress proxy reaches this add-on from 172.30.32.2,
+    the standard internal Supervisor address, same as any other add-on --
+    host_network: true only affects what this add-on's own listening port is
+    exposed to, not how Supervisor's ingress proxy reaches it. An earlier
+    version of this check assumed loopback instead and broke the real UI,
+    corrected after checking real log data rather than guessing again.
+    Anything outside 172.30.32.0/23 hitting /api/* is coming from the LAN,
+    not through ingress, and gets rejected. /audio and /images stay open on
+    purpose, the feeder itself fetches those directly over plain HTTP,
+    unauthenticated, by design.
+    """
+    if request.path.startswith("/api/"):
+        try:
+            remote_ip = ipaddress.ip_address(request.remote)
+        except (ValueError, TypeError):
+            remote_ip = None
+        if remote_ip is None or remote_ip not in _INGRESS_NETWORK:
+            _LOGGER.warning("Blocked /api/* request from outside the internal network: %s %s",
+                            request.remote, request.path)
+            return web.Response(status=403, text="Forbidden")
+    return await handler(request)
+
+
 def main():
-    app = web.Application()
+    app = web.Application(middlewares=[_restrict_api_middleware])
     app.on_startup.append(on_startup)
 
     app.router.add_get("/",                              handle_index)

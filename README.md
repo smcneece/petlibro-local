@@ -285,6 +285,16 @@ Petlibro firmware appears to cache the cloud broker's resolved IP address and wi
 
 The most reliable solution is to **block the device from accessing the internet entirely** at your router or firewall. With no route to the Petlibro cloud, the device has no fallback and stays on your local Mosquitto broker. Petlibro devices do not need internet access once they are on a local broker; all telemetry, commands, and heartbeats flow over MQTT on your LAN. Most routers let you block individual devices by MAC address under a firewall or access control section. Google can likely assist, please do not open issues on router support. 
 
+**If a device never picks up the DNS override at all:** a user-submitted packet capture confirmed that at least one hardware/firmware combination (One RFID Smart Feeder, `fw 2.0.47, hw 4.0.0`) never performs a DNS lookup for the broker, ever. Every reconnect goes straight to one of roughly a dozen cached/anycast cloud IPs, so a DNS override has nothing to intercept, it's simply never asked. If you suspect your device is doing this (Auto Setup capture never triggers, or a device that was working stops picking up a DNS change), a source-based NAT rule at your router works regardless of which cached IP the device dials:
+
+```
+-s <feeder-ip>/32 -p tcp --dport 1883 -j DNAT --to-destination <home-assistant-ip>:1883
+```
+
+This redirects that specific device's MQTT traffic to your Home Assistant IP no matter which destination it tries to reach. Most routers running iptables/nftables (UniFi, OPNsense, pfSense, etc.) support this; consult your router's documentation for source-based DNAT or port redirection. If your inter-VLAN firewall is allow-list style, remember the redirected packet still needs to be allowed through to the broker host/port, DNAT happens before filtering.
+
+**If a device has a backup battery installed and doesn't reconnect after a normal power cycle:** try removing the battery too, not just cutting AC power. This is based on limited testing, not fully confirmed, but a battery-backed unit may survive a brief power interruption without doing a genuine firmware reboot, in which case it just resumes whatever connection it already had instead of re-evaluating anything. Removing the battery forces a true cold boot.
+
 ### Auto Setup (Recommended)
 
 1. Open Petlibro Local and tap **Add Device**.

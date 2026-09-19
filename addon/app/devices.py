@@ -569,6 +569,13 @@ async def retract_ha_discovery(serial: str, cfg: dict, state: dict):
         _LOGGER.exception("Failed to retract HA discovery for %s...", serial[:6])
 
 
+async def publish_ha_state(serial: str):
+    """Public wrapper so other modules (e.g. main.py's feeding-plans endpoint)
+    can force an immediate state refresh -- e.g. next_meal needs to recompute
+    right away when plans are saved/emptied, not wait for some unrelated event."""
+    await _publish_ha_state(serial)
+
+
 async def _publish_ha_state(serial: str):
     """Push current device state values to HA MQTT state topics."""
     if _client_ref is None:
@@ -844,27 +851,32 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                                     )
                                 except Exception:
                                     pass
-                            # Pet eating notification
+                            # Pet eating notification -- independent on/off switch
+                            # (notify_eating_activity) so this frequent, low-stakes
+                            # ping can be turned off without also silencing the
+                            # separate, rarer no-eat alert, which shares the same
+                            # notify_bell/email/mobile channel fields below.
                             try:
-                                import notifications as _notif
-                                pet_name = pets.get(pet_id, {}).get("name") or "Your pet"
-                                dev_name = cfg.get("name") or serial[:8]
-                                mins = duration_secs // 60
-                                secs_r = duration_secs % 60
-                                dur_str = f"{mins}m{secs_r:02d}s" if mins else f"{secs_r}s"
-                                msg = f"{pet_name} ate for {dur_str} at {dev_name}"
-                                title = f"Petlibro Local: {msg}"
                                 pet_cfg = pets.get(pet_id, {})
-                                notify_cfg = {
-                                    "notify_bell":   pet_cfg.get("notify_bell", True),
-                                    "notify_email":  pet_cfg.get("notify_email", True),
-                                    "notify_mobile": pet_cfg.get("notify_mobile", False),
-                                }
-                                notif_id = f"petlibro_local_{(pet_id or serial)[:8]}_eating_{int(_time.time())}"
-                                asyncio.ensure_future(
-                                    _notif.fire_notification(title, msg, _storage.get_settings(), notify_cfg,
-                                                             notification_id=notif_id)
-                                )
+                                if pet_cfg.get("notify_eating_activity", True):
+                                    import notifications as _notif
+                                    pet_name = pets.get(pet_id, {}).get("name") or "Your pet"
+                                    dev_name = cfg.get("name") or serial[:8]
+                                    mins = duration_secs // 60
+                                    secs_r = duration_secs % 60
+                                    dur_str = f"{mins}m{secs_r:02d}s" if mins else f"{secs_r}s"
+                                    msg = f"{pet_name} ate for {dur_str} at {dev_name}"
+                                    title = f"Petlibro Local: {msg}"
+                                    notify_cfg = {
+                                        "notify_bell":   pet_cfg.get("notify_bell", True),
+                                        "notify_email":  pet_cfg.get("notify_email", True),
+                                        "notify_mobile": pet_cfg.get("notify_mobile", False),
+                                    }
+                                    notif_id = f"petlibro_local_{(pet_id or serial)[:8]}_eating_{int(_time.time())}"
+                                    asyncio.ensure_future(
+                                        _notif.fire_notification(title, msg, _storage.get_settings(), notify_cfg,
+                                                                 notification_id=notif_id)
+                                    )
                             except Exception:
                                 _LOGGER.exception("Pet eating notification error")
                     except Exception:
@@ -1121,6 +1133,8 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
             portions = data["actualGrainNum"]
             _storage.record_intake(serial, portions)
             _storage.log_feeder_event(serial, "food_dispensed", portions=portions)
+            _storage.save_device(serial, {"last_fed_ts": int(_time.time())})
+            asyncio.ensure_future(_publish_ha_state(serial))
             device_cfg = _storage.get_devices().get(serial, {})
             if device_cfg.get("notifications", {}).get("food_dispensed"):
                 import notifications as _notifications

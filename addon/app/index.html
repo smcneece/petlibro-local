@@ -582,6 +582,23 @@
       <label class="form-label">Activity Notifications</label>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
         <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="p-notify-eating-activity" style="width:16px;height:16px;accent-color:var(--pl-accent)">
+          <span>Notify each time my pet eats</span>
+        </label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="p-no-eat-enabled" style="width:16px;height:16px;accent-color:var(--pl-accent)">
+            <span>Alert if no eating session detected after</span>
+          </label>
+          <input type="number" id="p-no-eat-hours" class="form-input" min="1" max="72" value="12" style="width:70px">
+          <span style="font-size:14px">hours</span>
+        </div>
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:4px">
+      <label class="form-label">Notification Channels</label>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
           <input type="checkbox" id="p-notify-bell" style="width:16px;height:16px;accent-color:var(--pl-accent)">
           <span>In-app bell</span>
         </label>
@@ -593,21 +610,6 @@
           <input type="checkbox" id="p-notify-mobile" style="width:16px;height:16px;accent-color:var(--pl-accent)">
           <span>Mobile push</span>
         </label>
-      </div>
-    </div>
-    <div class="form-row" style="margin-top:4px">
-      <label class="form-label">Hasn't Eaten Alert</label>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
-          <input type="checkbox" id="p-no-eat-enabled" style="width:16px;height:16px;accent-color:var(--pl-accent)">
-          <span>Alert if no eating session detected</span>
-        </label>
-        <div id="p-no-eat-hours-row" style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:14px;white-space:nowrap">After</label>
-          <input type="number" id="p-no-eat-hours" class="form-input" min="1" max="72" value="12" style="width:70px">
-          <label style="font-size:14px">hours</label>
-        </div>
-        <p class="form-hint" style="margin:0">Uses the same notification channels as eating session alerts above.</p>
       </div>
     </div>
     <div style="margin-top:16px;display:flex;justify-content:center">

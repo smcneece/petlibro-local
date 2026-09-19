@@ -107,6 +107,7 @@ function openPetModal(pet) {
   }
 
   // Notification toggles
+  document.getElementById("p-notify-eating-activity").checked = pet ? (pet.notify_eating_activity ?? true) : true;
   document.getElementById("p-notify-bell").checked   = pet ? (pet.notify_bell   ?? true)  : true;
   document.getElementById("p-notify-email").checked  = pet ? (pet.notify_email  ?? true)  : true;
   document.getElementById("p-notify-mobile").checked = pet ? (pet.notify_mobile ?? false) : false;
@@ -176,6 +177,7 @@ async function savePet() {
     breed:         document.getElementById("p-breed").value.trim(),
     weight_kg:     weight_kg != null ? parseFloat(weight_kg.toFixed(3)) : null,
     rfid_tag:      rfidVal || null,
+    notify_eating_activity: document.getElementById("p-notify-eating-activity").checked,
     notify_bell:          document.getElementById("p-notify-bell").checked,
     notify_email:         document.getElementById("p-notify-email").checked,
     notify_mobile:        document.getElementById("p-notify-mobile").checked,
