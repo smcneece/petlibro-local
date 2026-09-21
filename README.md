@@ -137,7 +137,8 @@ The first time you set up a device, Petlibro Local briefly stops Mosquitto and r
 - Feeding schedule viewer with all scheduled meals, quantities, and enabled/disabled state
 - Display matrix: push scrolling text or a built-in icon (heart, dog, cat, elk) directly to the feeder LED display
 - **Custom Icon Editor**: draw pixel art on a 5 × 12 grid, preview it at full 26-pixel display width, save up to 12 named icons, and send them to the feeder with one tap. Includes a "Petlibro Salute" built-in preset
-- **Custom feed sounds**: upload an audio file (any common format, MP3/WAV/M4A/etc., converted automatically) or record one from your microphone, in the Settings → Audio tab. All feeders share one sound library there. From a feeder's Maintenance tab, pick a sound and push it to play on that feeder's scheduled feeds instead of the default chime. Requires a one-time "Local Audio Base URL" setting (a plain LAN address for this app, since the feeder fetches the file directly and can't use your logged-in browser session). Only plays on actual scheduled feeds; PetLibro's own protocol doesn't support sound on a manual Feed Now
+- **Custom feed sounds**: upload an audio file (any common format, MP3/WAV/M4A/etc., converted automatically) or record one from your microphone, in the Settings → Audio tab. All feeders share one sound library there. From a feeder's Maintenance tab, pick a sound and push it to play on that feeder's feeds instead of the default chime. Requires a one-time "Local Audio Base URL" setting (a plain LAN address for this app, since the feeder fetches the file directly and can't use your logged-in browser session). Plays on scheduled feeds and on a manual Feed Now
+- **Feed amount calibration (optional)**: shows amounts in real grams or ounces for your specific food instead of a flat 10g per portion guess. See [Feed Amount Calibration](#feed-amount-calibration-optional) below
 - All controls send directly to the device over local MQTT using the standard Petlibro service protocol
 
 > **Note:** Existing feeding schedules created in the Petlibro app will likely continue to run on the feeder, but it is recommended to recreate them in Petlibro Local to ensure they are managed and visible here. Schedules created in the cloud app may not survive a feeder reboot once the device is running locally.
@@ -146,6 +147,20 @@ The first time you set up a device, Petlibro Local briefly stops Mosquitto and r
 > 1. **Use the Home Assistant Companion App** on your phone. Recording works there even for local (non-HTTPS) connections.
 > 2. **Record with your phone or computer's own voice recorder app** (Windows' built-in Sound Recorder, or Voice Memos on Mac, both save as `.m4a`), then use Upload File instead of Record. Any common format works and is converted automatically.
 > 3. **Last resort:** some browsers let you manually allow microphone access on an insecure origin via an advanced/experimental flag (for example, Chrome's `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, where you add your Home Assistant address). This varies by browser and isn't something this app can configure for you.
+
+### Feed Amount Calibration (Optional)
+
+The One RFID and Granary feeders dispense through a fixed-volume scoop rather than a scale, so one "portion" doesn't weigh the same for every food. Out of the box, Petlibro Local assumes 10g per portion everywhere it shows an amount (Feed Now, schedules, activity log). If you'd rather see real numbers for your specific food, you can calibrate.
+
+**This is entirely optional.** If you never calibrate, nothing changes and everything keeps using 10g per portion. Calibration only changes how amounts are *displayed*; it does not change how much food the feeder dispenses.
+
+To calibrate:
+1. Open the feeder's device modal, go to the **Schedule** tab, and tap **Calibrate** in the Feed Amount Calibration section.
+2. The feeder dispenses one portion. Catch it in a small dish or cup and weigh it on your kitchen scale.
+3. Enter the reading in grams or ounces (ounces is the default if you use imperial units, but grams is more accurate if your scale can show it, since one portion is only about 10g or 0.35 oz).
+4. Repeat for 3 test feeds. You'll see the average, then choose **Save** or **Redo**.
+
+**Reset to Default** in the same section puts it back to 10g per portion at any time.
 
 ### Device Setup
 Two setup paths are available when adding a device.
@@ -340,6 +355,7 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Firmware Version | Sensor (diagnostic) | Current firmware version string |
 | Hardware Version | Sensor (diagnostic) | Hardware revision string |
 | Signal Strength | Sensor (diagnostic) | WiFi RSSI in dBm |
+| Clock Offset | Sensor (diagnostic) | Seconds the device's own clock is behind real time (negative if ahead). Petlibro Local sends a time correction on its own if this passes 30 seconds, so it normally sits near zero |
 
 **Last Fed** updates automatically when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
 
@@ -357,6 +373,7 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Firmware Version | Sensor (diagnostic) | Current firmware version string |
 | Hardware Version | Sensor (diagnostic) | Hardware revision string |
 | Signal Strength | Sensor (diagnostic) | WiFi RSSI in dBm |
+| Clock Offset | Sensor (diagnostic) | Seconds the device's own clock is behind real time (negative if ahead). Petlibro Local sends a time correction on its own if this passes 30 seconds, so it normally sits near zero |
 
 Applies to the Dockstream RFID Smart Fountain as well. That model additionally reports which pet's RFID tag was present during a drink, logged and attributed to that pet in its Recent Activity the same way the One RFID Smart Feeder attributes eating sessions.
 

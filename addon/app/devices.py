@@ -48,7 +48,23 @@ FOUNTAIN_DRINK_DEDUP_SECS = 15  # ignore a second qualifying weight-drop this so
 # signal, so this isn't settled for that device type. Leaving this OFF for
 # now given the feeder finding; revisit if a fountain-specific time-drift
 # complaint ever comes in.
-ENABLE_PROACTIVE_NTP_PUSH = False
+#
+# TURNED BACK ON (2026-09-20), CONFIRMED WORKING: Zoey's Feeder rebooted at
+# ~17:39 during an HA update, came up with a clock 555s slow (stale restored
+# time), its boot-time NTP request went unanswered because the broker/this
+# app were restarting, and it doesn't retry until its next ~24h timer, so a
+# 6:00 PM feed dropped at 6:09 PM. Pushing an unsolicited sync snapped its
+# clock from 555s slow to exact within a second, so the firmware DOES apply
+# one. Now used two ways: one push whenever a device comes back online, and
+# detect-and-correct (see _check_device_clock): every heartbeat carries the
+# device's own clock, so a correction is pushed only when it's actually off
+# by more than CLOCK_OFFSET_THRESHOLD_SECS. No blanket periodic push.
+ENABLE_PROACTIVE_NTP_PUSH = True
+
+CLOCK_OFFSET_THRESHOLD_SECS = 30
+CLOCK_CORRECTION_MIN_INTERVAL_SECS = 300   # at most one correction push per device per 5 min
+CLOCK_CORRECTION_MAX_TRIES = 3             # give up after this many pushes that don't fix it
+CLOCK_CORRECTION_BACKOFF_SECS = 3600       # then leave the device alone for an hour
 
 # Dedicated log file for NTP request/response/push activity, separate from
 # the main add-on log, so a multi-day observation window (see issue #5)
@@ -94,6 +110,15 @@ _ALERT_MESSAGES:  dict[str, str] = _device_types.all_alert_messages()
 _devices: dict[str, tuple[str, str]] = {}
 
 _pet_no_eat_alerted: dict[str, bool] = {}
+# In-memory only on purpose (NOT in _state, which gets persisted and reloaded):
+# a stale offset resurrected after a restart would be misleading.
+_clock_offset: dict[str, int] = {}
+_clock_fix_state: dict[str, dict] = {}
+_last_reconnect_push: dict[str, float] = {}
+# A broker restart can bounce a device online/offline several times in a
+# minute (real, seen 2026-09-20: four pushes to one feeder in ~50s). One
+# reconnect push per device per this window is plenty.
+RECONNECT_PUSH_COOLDOWN_SECS = 60
 
 _client_task:     asyncio.Task | None  = None
 _client_ref:      aiomqtt.Client | None = None
@@ -185,7 +210,9 @@ def _mark_online(serial: str):
                 # fountains have their own schedule-dependent behavior too
                 # (the light schedule, and cordless models' run schedule),
                 # so any device type benefits from an accurate clock.
-                asyncio.ensure_future(_push_ntp_sync(serial, device_type))
+                if _last_seen[serial] - _last_reconnect_push.get(serial, 0.0) >= RECONNECT_PUSH_COOLDOWN_SECS:
+                    _last_reconnect_push[serial] = _last_seen[serial]
+                    asyncio.ensure_future(_push_ntp_sync(serial, device_type))
 
 
 def _mark_offline(serial: str):
@@ -216,7 +243,8 @@ def get_device_state(serial: str) -> dict:
 
 def get_all_states() -> dict:
     return {
-        serial: {**_state.get(serial, {}), "online": _online.get(serial, False)}
+        serial: {**_state.get(serial, {}), "online": _online.get(serial, False),
+                 "clock_offset_secs": _clock_offset.get(serial)}
         for serial in _devices
     }
 
@@ -585,7 +613,8 @@ async def _publish_ha_state(serial: str):
         cfg   = _storage.get_devices().get(serial, {})
         state = _state.get(serial, {})
         plans = _storage.get_device_feeding_plans(serial)
-        await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans)
+        await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans,
+                                    clock_offset=_clock_offset.get(serial))
     except Exception:
         _LOGGER.exception("Failed to publish HA state for %s...", serial[:6])
 
@@ -1017,6 +1046,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         if rssi is not None:
             _state.setdefault(serial, {})["rssi"] = rssi
         _mark_online(serial)
+        asyncio.ensure_future(_check_device_clock(serial, data.get("ts")))
         asyncio.ensure_future(_check_and_fire_alerts(serial))
         asyncio.ensure_future(_publish_ha_state(serial))
         return
@@ -1473,6 +1503,43 @@ async def _push_ntp_sync(serial: str, device_type: str) -> None:
         _ntp_logger.exception("PROACTIVE PUSH to %s... FAILED", serial[:6])
 
 
+async def _check_device_clock(serial: str, device_ts_ms) -> None:
+    """Compares a heartbeat's own timestamp to real time. Every heartbeat
+    carries the device's clock, so a wrong one is visible within about a
+    minute. If it's off by more than CLOCK_OFFSET_THRESHOLD_SECS, pushes a
+    time sync (rate limited, with backoff if the device doesn't take it).
+    Positive offset means the device clock is slow."""
+    import time as _t
+    if not isinstance(device_ts_ms, (int, float)) or device_ts_ms < 1e12:
+        return  # not an epoch-ms timestamp (e.g. a device that hasn't set its clock yet)
+    now = _t.time()
+    offset = round(now - device_ts_ms / 1000.0)
+    _clock_offset[serial] = offset
+    fix = _clock_fix_state.setdefault(serial, {"last_push": 0.0, "tries": 0, "backoff_until": 0.0})
+    if abs(offset) <= CLOCK_OFFSET_THRESHOLD_SECS:
+        fix["tries"] = 0
+        return
+    if not ENABLE_PROACTIVE_NTP_PUSH:
+        return
+    if now < fix["backoff_until"] or now - fix["last_push"] < CLOCK_CORRECTION_MIN_INTERVAL_SECS:
+        return
+    device_type = _devices.get(serial, (None, None))[1]
+    if not device_type:
+        return
+    if fix["tries"] >= CLOCK_CORRECTION_MAX_TRIES:
+        fix["tries"] = 0
+        fix["backoff_until"] = now + CLOCK_CORRECTION_BACKOFF_SECS
+        _ntp_logger.info("CLOCK OFF %+ds on %s... (%s), %d correction pushes did not fix it, leaving it alone for %ds",
+                         offset, serial[:6], _device_name(serial), CLOCK_CORRECTION_MAX_TRIES,
+                         CLOCK_CORRECTION_BACKOFF_SECS)
+        return
+    fix["tries"] += 1
+    fix["last_push"] = now
+    _ntp_logger.info("CLOCK OFF %+ds on %s... (%s), pushing correction (attempt %d)",
+                     offset, serial[:6], _device_name(serial), fix["tries"])
+    await _push_ntp_sync(serial, device_type)
+
+
 # ── Offline watchdog ───────────────────────────────────────────────────────
 
 async def _offline_watchdog():
@@ -1506,7 +1573,6 @@ async def _offline_watchdog():
                 if now - _last_attr_poll.get(serial, 0) < ATTR_POLL_INTERVAL_SECS:
                     continue
                 await _poll_attr_state(serial, device_type)
-                await _push_ntp_sync(serial, device_type)
 
         # Per-pet hasn't-eaten check
         try:

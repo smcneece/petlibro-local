@@ -43,6 +43,20 @@ function openDeviceModal(device) {
     powerEl.style.display = "none";
   }
 
+  // Device clock vs real time, from heartbeats. Positive = device is slow.
+  // The add-on pushes a correction itself past ~30s, so this normally reads
+  // "in sync"; a lingering large value means the device ignored the push.
+  const clockEl = document.getElementById("detail-clock");
+  const off = device.clock_offset_secs;
+  if (device.online && off != null) {
+    const mag = Math.abs(off) >= 120 ? `${Math.round(Math.abs(off) / 60)}m` : `${Math.abs(off)}s`;
+    clockEl.textContent = Math.abs(off) <= 30 ? `🕒 ${t("clock.synced")}`
+      : off > 0 ? `🕒 ${t("clock.slow", { n: mag })}` : `🕒 ${t("clock.fast", { n: mag })}`;
+    clockEl.style.display = "";
+  } else {
+    clockEl.style.display = "none";
+  }
+
   const isFeeder = device.device_type === "one_rfid" || device.device_type === "granary";
   const isFountain = device.device_type?.startsWith("dockstream");
   document.querySelectorAll(".dtab").forEach(b => {
@@ -167,11 +181,11 @@ function buildOverviewTab(device) {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
         <select class="form-input" id="feeder-portions" style="width:110px">
-          <option value="1" selected>${fmtPortions(1)}</option>
-          <option value="2">${fmtPortions(2)}</option>
-          <option value="3">${fmtPortions(3)}</option>
-          <option value="4">${fmtPortions(4)}</option>
-          <option value="5">${fmtPortions(5)}</option>
+          <option value="1" selected>${fmtPortions(1, device.calibrated_grams_per_portion)}</option>
+          <option value="2">${fmtPortions(2, device.calibrated_grams_per_portion)}</option>
+          <option value="3">${fmtPortions(3, device.calibrated_grams_per_portion)}</option>
+          <option value="4">${fmtPortions(4, device.calibrated_grams_per_portion)}</option>
+          <option value="5">${fmtPortions(5, device.calibrated_grams_per_portion)}</option>
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -258,11 +272,11 @@ function buildOverviewTab(device) {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
         <select class="form-input" id="feeder-portions" style="width:110px">
-          <option value="1" selected>${fmtPortions(1)}</option>
-          <option value="2">${fmtPortions(2)}</option>
-          <option value="3">${fmtPortions(3)}</option>
-          <option value="4">${fmtPortions(4)}</option>
-          <option value="5">${fmtPortions(5)}</option>
+          <option value="1" selected>${fmtPortions(1, device.calibrated_grams_per_portion)}</option>
+          <option value="2">${fmtPortions(2, device.calibrated_grams_per_portion)}</option>
+          <option value="3">${fmtPortions(3, device.calibrated_grams_per_portion)}</option>
+          <option value="4">${fmtPortions(4, device.calibrated_grams_per_portion)}</option>
+          <option value="5">${fmtPortions(5, device.calibrated_grams_per_portion)}</option>
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -608,7 +622,7 @@ function buildFeederLogTab(device, entries) {
 
     let line;
     if (e.type === "food_dispensed") {
-      const portions = fmtPortions(e.portions);
+      const portions = fmtPortions(e.portions, device.calibrated_grams_per_portion);
       line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.food_dispensed", {portions: escHtml(portions)})}`;
     } else if (e.type === "pet_eating") {
       const who = petName ? escHtml(petName) : t("pet.unnamed");
@@ -691,7 +705,7 @@ function buildScheduleTab(plans) {
     const sound = plan.enableAudio ? ` · ${t("schedule.sound_times", {n: plan.audioTimes||1})}` : "";
     return `<div class="sched-row${enabled?"":' disabled'}" data-idx="${i}">
       <div class="sched-time">${escHtml(fmtTime12(_utcToLocal(plan.executionTime||"00:00")))}</div>
-      <div class="sched-meta">${escHtml(dayLabel)} · ${escHtml(fmtPortions(portions))}${escHtml(sound)}</div>
+      <div class="sched-meta">${escHtml(dayLabel)} · ${escHtml(fmtPortions(portions, _currentDevice?.calibrated_grams_per_portion))}${escHtml(sound)}</div>
       <div class="sched-actions">
         <button class="sched-toggle${enabled?" on":""}" data-idx="${i}" title="${enabled?"Disable":"Enable"}"></button>
         <button class="sched-edit-btn" data-idx="${i}" title="Edit">✏️</button>
@@ -715,7 +729,7 @@ function buildScheduleTab(plans) {
     <div class="form-row">
       <label>${t("schedule.portions")}</label>
       <div class="portion-chips" id="sf-portions">
-        ${[1,2,3,4,5].map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${escHtml(fmtPortions(n))}</div>`).join("")}
+        ${[1,2,3,4,5].map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${escHtml(fmtPortions(n, _currentDevice?.calibrated_grams_per_portion))}</div>`).join("")}
       </div>
     </div>
     <div class="form-row" style="display:flex;align-items:center;gap:10px">
@@ -735,11 +749,22 @@ function buildScheduleTab(plans) {
 
   const addBtn = `<button class="btn-secondary" id="sched-add-btn" style="width:100%;margin-bottom:10px">${t("schedule.add")}</button>`;
 
+  const calSection = (_currentDevice?.device_type === "one_rfid" || _currentDevice?.device_type === "granary") ? `
+    <div class="tab-section-heading" style="margin-top:18px">${t("maint.feed_calibration")}</div>
+    <p class="form-hint">${_currentDevice.calibrated_grams_per_portion
+      ? t("maint.feed_calibration_set", {grams: _currentDevice.calibrated_grams_per_portion})
+      : t("maint.feed_calibration_unset")}</p>
+    <div style="display:flex;gap:8px">
+      <button class="btn-secondary" id="btn-calibrate-feed" style="flex:1">${t("maint.calibrate_feed")}</button>
+      ${_currentDevice.calibrated_grams_per_portion ? `<button class="btn-secondary" id="btn-reset-feed-calibration" style="flex-shrink:0;color:var(--pl-danger)">${t("maint.reset_calibration")}</button>` : ""}
+    </div>` : "";
+
   return `<div class="tab-section-heading">${t("schedule.heading")}</div>
     ${addBtn}
     ${form}
     <div class="sched-list" id="sched-list">${rows || `<p style="color:var(--pl-subtext);text-align:center;padding:12px 0">${t("schedule.no_plans")}</p>`}</div>
-    <p style="font-size:11px;color:var(--pl-subtext);margin-top:4px">${t("schedule.sync_note")}</p>`;
+    <p style="font-size:11px;color:var(--pl-subtext);margin-top:4px">${t("schedule.sync_note")}</p>
+    ${calSection}`;
 }
 
 // In-memory plans for schedule tab editing
@@ -754,6 +779,17 @@ function wireScheduleTabHandlers() {
   const list = document.getElementById("sched-list");
   const form = document.getElementById("sched-form");
   if (!list || !form) return;
+
+  const calibrateBtn = document.getElementById("btn-calibrate-feed");
+  if (calibrateBtn) calibrateBtn.onclick = () => openFeedCalibration(_currentDevice);
+  const resetCalBtn = document.getElementById("btn-reset-feed-calibration");
+  if (resetCalBtn) {
+    resetCalBtn.onclick = async () => {
+      await api("POST", `/api/devices/${_currentDevice.serial}`, { calibrated_grams_per_portion: null });
+      _patchDevice(_currentDevice.serial, { calibrated_grams_per_portion: null });
+      renderDeviceTab("schedule");
+    };
+  }
 
   function openForm(idx) {
     const plan = idx >= 0 ? _schedPlans[idx] : null;

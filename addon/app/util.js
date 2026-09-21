@@ -99,11 +99,13 @@ function gramsToDisplay(grams) {
 // plain integer portion count, grams/oz are display-only, computed here.
 // Was cup fractions (1/12 cup per portion) until 2026-09-13, switched to oz
 // to match the OEM app's own display, which shows oz rather than cups now.
-function fmtPortions(n) {
+function fmtPortions(n, gramsPerPortion) {
+  const g = gramsPerPortion || 10;
+  const grams = Math.round(n * g * 10) / 10;
   if (useImperial()) {
-    return `${(n * 10 / 28.349523125).toFixed(2)}oz`;
+    return `${(grams / 28.349523125).toFixed(2)}oz`;
   }
-  return `${n * 10}g`;
+  return `${grams}g`;
 }
 
 const _DISPLAY_ICONS = { 5: "❤ Heart", 6: "🐕 Dog", 7: "🐱 Cat", 8: "🦌 Elk" };

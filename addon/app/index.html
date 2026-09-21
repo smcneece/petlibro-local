@@ -281,6 +281,7 @@
           <span class="fw-badge" id="detail-fw" style="display:none"></span>
           <span class="fw-badge" id="detail-hw" style="display:none"></span>
           <span class="fw-badge" id="detail-power" style="display:none"></span>
+          <span class="fw-badge" id="detail-clock" style="display:none"></span>
         </div>
       </div>
     </div>
@@ -716,6 +717,17 @@
   </div>
 </div>
 
+<!-- Feed amount calibration wizard -->
+<div class="modal-overlay" id="feed-cal-overlay">
+  <div class="modal" style="max-width:420px;width:calc(100% - 32px)">
+    <div class="modal-header">
+      <span class="modal-title" data-i18n="cal.title">Calibrate Feed Amount</span>
+      <button onclick="closeFeedCalibration()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--pl-subtext);line-height:1;padding:4px">&#x2715;</button>
+    </div>
+    <div id="feed-cal-body"></div>
+  </div>
+</div>
+
 <!-- Crop modal -->
 <div class="crop-modal-backdrop" id="modal-crop">
   <div class="crop-modal">
@@ -744,6 +756,7 @@
 <script src="modal-edit.js?v={{VERSION}}"></script>
 <script src="modal-add.js?v={{VERSION}}"></script>
 <script src="modal-icon-editor.js?v={{VERSION}}"></script>
+<script src="modal-feed-calibration.js?v={{VERSION}}"></script>
 <script src="pets.js?v={{VERSION}}"></script>
 <script src="settings.js?v={{VERSION}}"></script>
 <script src="init.js?v={{VERSION}}"></script>

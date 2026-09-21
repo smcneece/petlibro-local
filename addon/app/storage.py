@@ -55,6 +55,7 @@ ALLOWED_DEVICE_FIELDS = {
     "light_start_time",
     "light_end_time",
     "last_drink_ts",
+    "calibrated_grams_per_portion",
 }
 
 ALLOWED_PET_FIELDS = {

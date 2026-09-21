@@ -143,6 +143,18 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
         "entity_category": "diagnostic",
     })))
 
+    # Seconds the device's own clock is behind real time (negative = ahead),
+    # measured from each heartbeat's timestamp. The add-on pushes a correction
+    # on its own when this exceeds ~30s, so it normally sits near zero.
+    entities.append(("sensor", "clock_offset", _e(serial, "clock_offset", b, {
+        "name":                "Clock Offset",
+        "state_topic":         state_topic(serial, "clock_offset"),
+        "unit_of_measurement": "s",
+        "state_class":         "measurement",
+        "entity_category":     "diagnostic",
+        "icon":                "mdi:clock-alert-outline",
+    })))
+
     # ── Fountain ──────────────────────────────────────────────────────────
     if device_type in _FOUNTAIN_TYPES:
         entities.append(("sensor", "water_level", _e(serial, "water_level", b, {
@@ -469,11 +481,15 @@ def _next_meal_ts(plans: list) -> str | None:
     return best.isoformat() if best else None
 
 
-async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list | None = None):
+async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list | None = None,
+                        clock_offset: int | None = None):
     """Publish current sensor values to all HA state topics for this device."""
     device_type = cfg.get("device_type", "")
 
     # All devices
+    if clock_offset is not None:
+        await client.publish(state_topic(serial, "clock_offset"), str(clock_offset), retain=True)
+
     if "rssi" in state:
         await client.publish(state_topic(serial, "rssi"), str(state["rssi"]), retain=True)
 
