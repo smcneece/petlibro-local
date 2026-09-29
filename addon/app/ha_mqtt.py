@@ -320,6 +320,12 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "state_class":         "measurement",
         })))
 
+        entities.append(("sensor", "last_fed", _e(serial, "last_fed", b, {
+            "name":         "Last Fed",
+            "state_topic":  state_topic(serial, "last_fed"),
+            "device_class": "timestamp",
+        })))
+
         entities.append(("sensor", "next_meal", _e(serial, "next_meal", b, {
             "name":         "Next Meal",
             "state_topic":  state_topic(serial, "next_meal"),
@@ -580,6 +586,11 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
     elif device_type == "granary":
         if "electricQuantity" in state:
             await client.publish(state_topic(serial, "battery"), str(state["electricQuantity"]), retain=True)
+
+        last_fed = cfg.get("last_fed_ts")
+        if last_fed:
+            dt = datetime.datetime.fromtimestamp(int(last_fed), tz=datetime.timezone.utc)
+            await client.publish(state_topic(serial, "last_fed"), dt.isoformat(), retain=True)
 
         if plans is not None:
             next_ts = _next_meal_ts(plans)

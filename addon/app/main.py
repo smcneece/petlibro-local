@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "2026.09.6"
+VERSION = "2026.09.7"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -653,14 +653,26 @@ async def handle_api_diag_ntp_log(request):
     add-on's own container, which isn't visible from the Terminal add-on
     or any other add-on's shell, each add-on gets its own private /data
     volume, so this is served over HTTP instead. Temporary, for the issue #5
-    investigation, not linked from any permanent UI yet."""
+    investigation, not linked from any permanent UI yet.
+
+    The log now rotates at 1MB (see devices.py), so the current file alone
+    may not cover a full 24h+ investigation window if a device has been
+    misbehaving. Prepend the one rotated backup, if present, so a download
+    still covers the older activity that rolled out of the live file."""
     import time
     path = "/data/ntp_debug.log"
+    body_parts = []
+    try:
+        with open(path + ".1", "r", encoding="utf-8") as f:
+            body_parts.append(f.read())
+    except FileNotFoundError:
+        pass
     try:
         with open(path, "r", encoding="utf-8") as f:
-            body = f.read()
+            body_parts.append(f.read())
     except FileNotFoundError:
-        body = "(no ntp_debug.log yet -- no NTP activity logged since this add-on last started)\n"
+        pass
+    body = "".join(body_parts) or "(no ntp_debug.log yet -- no NTP activity logged since this add-on last started)\n"
     filename = f"ntp-debug-{time.strftime('%Y%m%dT%H%M%S')}.log"
     return web.Response(
         text=body,

@@ -33,9 +33,9 @@ function closeFeedCalibration() {
 
 function _calRenderIntro() {
   document.getElementById("feed-cal-body").innerHTML = `
-    <p class="form-hint">This will dispense 1 portion, ${_CAL_MEASUREMENTS_NEEDED} times. After each one, weigh what came out on your own kitchen scale and enter the grams. The average becomes this feeder's portion size everywhere amounts are shown.</p>
-    <p class="form-hint">Since this feeder dispenses through a fixed-volume scoop rather than a scale, individual dispenses will vary a little, this gives a real average for your specific food instead of a flat guess.</p>
-    <button class="btn-primary" id="cal-start-btn" style="width:100%;margin-top:8px">Start</button>
+    <p class="form-hint">${t("cal.intro1", {n: _CAL_MEASUREMENTS_NEEDED})}</p>
+    <p class="form-hint">${t("cal.intro2")}</p>
+    <button class="btn-primary" id="cal-start-btn" style="width:100%;margin-top:8px">${t("cal.start")}</button>
   `;
   document.getElementById("cal-start-btn").onclick = () => _calStartRound();
 }
@@ -43,8 +43,8 @@ function _calRenderIntro() {
 async function _calStartRound() {
   _calStep++;
   document.getElementById("feed-cal-body").innerHTML = `
-    <p class="form-hint">Step ${_calStep + 1} of ${_CAL_MEASUREMENTS_NEEDED}: dispensing 1 portion...</p>
-    <button class="btn-secondary" id="cal-dispense-btn" style="width:100%" disabled>Dispensing...</button>
+    <p class="form-hint">${t("cal.step_dispensing", {step: _calStep + 1, total: _CAL_MEASUREMENTS_NEEDED})}</p>
+    <button class="btn-secondary" id="cal-dispense-btn" style="width:100%" disabled>${t("cal.dispensing")}</button>
   `;
   try {
     await api("POST", `/api/devices/${_calDevice.serial}/command`, {
@@ -60,20 +60,20 @@ async function _calStartRound() {
 
 function _calRenderWeighStep() {
   document.getElementById("feed-cal-body").innerHTML = `
-    <p class="form-hint">Step ${_calStep + 1} of ${_CAL_MEASUREMENTS_NEEDED}: weigh what was just dispensed and enter the reading.</p>
+    <p class="form-hint">${t("cal.step_weigh", {step: _calStep + 1, total: _CAL_MEASUREMENTS_NEEDED})}</p>
     <div class="form-row">
-      <label class="form-label">Weight</label>
+      <label class="form-label">${t("cal.weight")}</label>
       <div style="display:flex;gap:8px">
         <input class="form-input" type="number" id="cal-weight-input" min="0.01" step="0.01" style="flex:1">
         <select class="form-input" id="cal-unit-select" style="width:auto">
-          <option value="g"${_calUnit === "g" ? " selected" : ""}>grams</option>
-          <option value="oz"${_calUnit === "oz" ? " selected" : ""}>ounces</option>
+          <option value="g"${_calUnit === "g" ? " selected" : ""}>${t("cal.grams")}</option>
+          <option value="oz"${_calUnit === "oz" ? " selected" : ""}>${t("cal.ounces")}</option>
         </select>
       </div>
-      <p class="form-hint" style="margin-top:6px">One portion is only about 10g (0.35 oz), so grams is more accurate if your scale can show it. A scale that only reads to 0.1 oz can be off by a few grams.</p>
+      <p class="form-hint" style="margin-top:6px">${t("cal.unit_hint")}</p>
     </div>
     <button class="btn-primary" id="cal-weight-next-btn" style="width:100%;margin-top:8px">
-      ${_calStep + 1 < _CAL_MEASUREMENTS_NEEDED ? "Next" : "Finish"}
+      ${_calStep + 1 < _CAL_MEASUREMENTS_NEEDED ? t("cal.next") : t("cal.finish")}
     </button>
   `;
   const btn = document.getElementById("cal-weight-next-btn");
@@ -99,11 +99,11 @@ function _calRenderSummary() {
   const avg = _calMeasurements.reduce((a, b) => a + b, 0) / _calMeasurements.length;
   const avgRounded = Math.round(avg * 10) / 10;
   document.getElementById("feed-cal-body").innerHTML = `
-    <p class="form-hint">Measurements: ${_calMeasurements.map(m => `${m}g`).join(", ")}</p>
-    <p class="form-hint">Average: <strong>${avgRounded}g (${(avgRounded / _CAL_GRAMS_PER_OZ).toFixed(2)} oz) per portion</strong></p>
+    <p class="form-hint">${t("cal.measurements", {list: _calMeasurements.map(m => `${m}g`).join(", ")})}</p>
+    <p class="form-hint">${t("cal.average", {grams: avgRounded, oz: (avgRounded / _CAL_GRAMS_PER_OZ).toFixed(2)})}</p>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn-secondary" id="cal-redo-btn" style="flex:1">Redo</button>
-      <button class="btn-primary" id="cal-save-btn" style="flex:1">Save</button>
+      <button class="btn-secondary" id="cal-redo-btn" style="flex:1">${t("cal.redo")}</button>
+      <button class="btn-primary" id="cal-save-btn" style="flex:1">${t("cal.save")}</button>
     </div>
   `;
   document.getElementById("cal-redo-btn").onclick = () => {

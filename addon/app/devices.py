@@ -9,6 +9,7 @@ import asyncio
 import collections
 import json
 import logging
+import logging.handlers
 import os
 
 import aiomqtt
@@ -70,11 +71,19 @@ CLOCK_CORRECTION_BACKOFF_SECS = 3600       # then leave the device alone for an 
 # the main add-on log, so a multi-day observation window (see issue #5)
 # doesn't require scrolling a huge combined log to find these lines.
 _NTP_LOG_FILE = "/data/ntp_debug.log"
+# Rotates at 1MB, keeping one backup (ntp_debug.log.1) -- plain FileHandler
+# had no size limit at all, so a device stuck in a correction retry loop, or
+# one that keeps bouncing on and off Wi-Fi, could grow this file unbounded
+# on what might be an SD card. 1MB + 1 backup covers well over a month of
+# even that misbehaving-device volume (normal use is under 1MB/year).
+_NTP_LOG_MAX_BYTES = 1 * 1024 * 1024
+_NTP_LOG_BACKUP_COUNT = 1
 _ntp_logger = logging.getLogger("petlibro_local.ntp")
 _ntp_logger.setLevel(logging.INFO)
 _ntp_logger.propagate = False
 try:
-    _ntp_handler = logging.FileHandler(_NTP_LOG_FILE)
+    _ntp_handler = logging.handlers.RotatingFileHandler(
+        _NTP_LOG_FILE, maxBytes=_NTP_LOG_MAX_BYTES, backupCount=_NTP_LOG_BACKUP_COUNT)
     _ntp_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     _ntp_logger.addHandler(_ntp_handler)
 except Exception:
@@ -115,6 +124,19 @@ _pet_no_eat_alerted: dict[str, bool] = {}
 _clock_offset: dict[str, int] = {}
 _clock_fix_state: dict[str, dict] = {}
 _last_reconnect_push: dict[str, float] = {}
+# Missed-feed watchdog (see _check_missed_feeds). In-memory only on purpose:
+# it can only judge feeds it was watching, so it never looks back past the
+# add-on's own start or a device's last reconnect.
+ENABLE_MISSED_FEED_ALERT = True
+MISSED_FEED_LEEWAY_SECS = 300       # how long after the scheduled time before it counts as missed
+MISSED_FEED_LOOKBACK_SECS = 1800    # ignore misses older than this (don't alert about ancient history)
+_ADDON_START_TS = __import__("time").time()
+_online_since: dict[str, float] = {}
+_missed_feed_alerted: dict[tuple, float] = {}
+_pending_manual_feed: dict[str, float] = {}
+# Longest observed GRAIN_START -> GRAIN_END gap in real captures was well
+# under 10s; this is a generous window, not a measured firmware timeout.
+_MANUAL_FEED_WINDOW_SECS = 60
 # A broker restart can bounce a device online/offline several times in a
 # minute (real, seen 2026-09-20: four pushes to one feeder in ~50s). One
 # reconnect push per device per this window is plenty.
@@ -196,6 +218,7 @@ def _mark_online(serial: str):
     _online[serial] = True
     if not was_online:
         _offline_since.pop(serial, None)
+        _online_since[serial] = _last_seen[serial]
         if _client_ref is not None:
             asyncio.ensure_future(ha_mqtt.publish_availability(_client_ref, serial, True))
             device_type = _devices.get(serial, (None, None))[1]
@@ -280,6 +303,12 @@ async def send_command(serial: str, payload: dict) -> bool:
     if _client_ref is None:
         _LOGGER.warning("send_command: no MQTT client")
         return False
+    if payload.get("cmd") == "MANUAL_FEEDING_SERVICE":
+        # Every manual dispense (Feed Now, the calibration wizard) is
+        # requested by us, unlike a scheduled feed which the feeder fires on
+        # its own with no command from this app. Recording when we asked
+        # lets _ack_grain_output tell the two apart in the activity log.
+        _pending_manual_feed[serial] = time.time()
     envelope = {
         "cmd":   "ATTR_SET_SERVICE",
         "ts":    int(time.time() * 1000),
@@ -527,7 +556,7 @@ async def _check_and_fire_alerts(serial: str):
                     continue
                 _storage.save_alert_last_fired(serial, alert, time.time())
             msg      = _ALERT_MESSAGES.get(alert, alert)
-            title    = f"Petlibro Local: {name} — {msg}"
+            title    = f"Petlibro Local: {name} - {msg}"
             notif_id = f"petlibro_local_{serial[:8]}_{alert}"
             await _notifications.fire_notification(title, msg, settings, device_cfg,
                                                    notification_id=notif_id)
@@ -537,7 +566,7 @@ async def _check_and_fire_alerts(serial: str):
             offline_id = f"petlibro_local_{serial[:8]}_offline"
             await _notifications.dismiss_notification(offline_id, settings, device_cfg)
             msg   = "Device is back online."
-            title = f"Petlibro Local: {name} — {msg}"
+            title = f"Petlibro Local: {name} - {msg}"
             await _notifications.fire_notification(title, msg, settings, device_cfg)
             _LOGGER.info("Back-online notification fired for %s...", serial[:6])
         if "power_battery" in cleared:
@@ -556,7 +585,7 @@ async def _check_and_fire_alerts(serial: str):
                        f"restored at {_format_local_time(int(now_ms))} ({dur_str}).")
             else:
                 msg = "AC power restored."
-            title = f"Petlibro Local: {name} — {msg}"
+            title = f"Petlibro Local: {name} - {msg}"
             await _notifications.fire_notification(title, msg, settings, device_cfg)
             _LOGGER.info("Power-restored notification fired for %s...: %s", serial[:6], msg)
     except Exception:
@@ -1161,16 +1190,23 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
         try:
             import storage as _storage
             portions = data["actualGrainNum"]
+            # A recent send_command(MANUAL_FEEDING_SERVICE) for this device means
+            # we asked for this dispense (Feed Now or the calibration wizard);
+            # otherwise the feeder fired it on its own from its schedule. Consume
+            # the marker either way, a stale one is no longer useful either.
+            pending_at = _pending_manual_feed.pop(serial, None)
+            source = "manual" if pending_at and (_time.time() - pending_at) <= _MANUAL_FEED_WINDOW_SECS else "scheduled"
             _storage.record_intake(serial, portions)
-            _storage.log_feeder_event(serial, "food_dispensed", portions=portions)
+            _storage.log_feeder_event(serial, "food_dispensed", portions=portions, extra={"source": source})
             _storage.save_device(serial, {"last_fed_ts": int(_time.time())})
             asyncio.ensure_future(_publish_ha_state(serial))
             device_cfg = _storage.get_devices().get(serial, {})
             if device_cfg.get("notifications", {}).get("food_dispensed"):
                 import notifications as _notifications
                 name  = device_cfg.get("name") or serial[:8]
-                msg   = f"Food dispensed — {portions} portion{'s' if portions != 1 else ''} at {name}"
-                title = f"Petlibro Local: {name} — Food dispensed"
+                source_label = "Manual" if source == "manual" else "Scheduled"
+                msg   = f"Food dispensed - {source_label} - {portions} portion{'s' if portions != 1 else ''} at {name}"
+                title = f"Petlibro Local: {name} - Food dispensed"
                 notif_id = f"petlibro_local_{serial[:8]}_food_dispensed_{int(_time.time())}"
                 asyncio.ensure_future(
                     _notifications.fire_notification(title, msg, _storage.get_settings(), device_cfg,
@@ -1540,6 +1576,74 @@ async def _check_device_clock(serial: str, device_ts_ms) -> None:
     await _push_ntp_sync(serial, device_type)
 
 
+async def _check_missed_feeds() -> None:
+    """Alerts when an enabled scheduled feed passes its time plus a leeway
+    with no dispense recorded. Feeders run their schedule off their own
+    clock and report each completed dispense, so a scheduled time with no
+    dispense event behind it is a real signal (late, missed, or empty hopper).
+    Only judges feeds this add-on was actually watching: skipped if the
+    scheduled time is before the add-on started or before the device last
+    (re)connected, since the dispense event may simply not have reached us.
+    The Granary reports dispenses the same way (confirmed by a user's activity
+    log, 2026-09-29), so it is checked too."""
+    import datetime as _dt
+    import time as _t
+    if not ENABLE_MISSED_FEED_ALERT:
+        return
+    import storage as _storage
+    import notifications as _notifications
+    now = _t.time()
+    for k in [k for k, v in _missed_feed_alerted.items() if now - v > 86400]:
+        _missed_feed_alerted.pop(k, None)
+    settings = _storage.get_settings()
+    devices_data = _storage.get_devices()
+    for serial, (_, device_type) in list(_devices.items()):
+        if device_type not in ("one_rfid", "granary") or not _online.get(serial):
+            continue
+        cfg = devices_data.get(serial, {})
+        if not cfg.get("notifications", {}).get("missed_feed", True):
+            continue
+        watching_since = max(_ADDON_START_TS, _online_since.get(serial, 0.0))
+        dispenses = [e.get("ts", 0) / 1000 for e in _storage.get_feeder_log(serial, 100)
+                     if e.get("type") == "food_dispensed"]
+        today = _dt.datetime.now(_dt.timezone.utc).date()
+        for plan in _storage.get_device_feeding_plans(serial):
+            if plan.get("_enabled") is False:
+                continue
+            exec_time = plan.get("executionTime", "")
+            repeat_day = plan.get("repeatDay", [])
+            try:
+                h, m = map(int, exec_time.split(":"))
+            except (ValueError, AttributeError):
+                continue
+            for day_offset in (0, -1):
+                day = today + _dt.timedelta(days=day_offset)
+                if day.weekday() + 1 not in repeat_day:
+                    continue
+                expected = _dt.datetime(day.year, day.month, day.day, h, m,
+                                        tzinfo=_dt.timezone.utc).timestamp()
+                if not (now - MISSED_FEED_LOOKBACK_SECS <= expected <= now - MISSED_FEED_LEEWAY_SECS):
+                    continue
+                if expected < watching_since:
+                    continue
+                if any(expected - 120 <= d <= now for d in dispenses):
+                    continue
+                key = (serial, plan.get("planId", exec_time), int(expected))
+                if key in _missed_feed_alerted:
+                    continue
+                _missed_feed_alerted[key] = now
+                name = cfg.get("name") or serial[:8]
+                import re as _re
+                when = _re.sub(r"(:\d\d):\d\d", r"\1", _format_local_time(int(expected * 1000)))
+                msg = (f"The {when} scheduled feed on {name} did not dispense "
+                       f"(nothing recorded within {MISSED_FEED_LEEWAY_SECS // 60} minutes).")
+                title = f"Petlibro Local: {name} - Scheduled feed missed"
+                _LOGGER.info("Missed scheduled feed on %s...: expected %s", serial[:6], when)
+                asyncio.ensure_future(_notifications.fire_notification(
+                    title, msg, settings, cfg,
+                    notification_id=f"petlibro_local_{serial[:8]}_missed_feed_{int(expected)}"))
+
+
 # ── Offline watchdog ───────────────────────────────────────────────────────
 
 async def _offline_watchdog():
@@ -1573,6 +1677,11 @@ async def _offline_watchdog():
                 if now - _last_attr_poll.get(serial, 0) < ATTR_POLL_INTERVAL_SECS:
                     continue
                 await _poll_attr_state(serial, device_type)
+
+        try:
+            await _check_missed_feeds()
+        except Exception:
+            _LOGGER.exception("Missed-feed watchdog error")
 
         # Per-pet hasn't-eaten check
         try:

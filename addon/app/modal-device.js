@@ -623,7 +623,10 @@ function buildFeederLogTab(device, entries) {
     let line;
     if (e.type === "food_dispensed") {
       const portions = fmtPortions(e.portions, device.calibrated_grams_per_portion);
-      line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.food_dispensed", {portions: escHtml(portions)})}`;
+      const key = e.source === "manual" ? "log.food_dispensed_manual"
+        : e.source === "scheduled" ? "log.food_dispensed_scheduled"
+        : "log.food_dispensed"; // older entries logged before this distinction existed
+      line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t(key, {portions: escHtml(portions)})}`;
     } else if (e.type === "pet_eating") {
       const who = petName ? escHtml(petName) : t("pet.unnamed");
       line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.pet_ate", {name: who, duration: escHtml(fmtDuration(e.duration_secs))})}`;
@@ -924,6 +927,7 @@ function buildNotificationsTab(device) {
     { key: "housing_due",   label: t("notif.housing_due") },
     { key: "power_battery", label: t("notif.power_battery") },
     { key: "door_jam",      label: t("notif.door_jam") },
+    { key: "missed_feed",   label: t("notif.missed_feed") },
     { key: "food_dispensed", label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",       label: t("notif.offline") },
   ] : device.device_type === "granary" ? [
@@ -934,6 +938,7 @@ function buildNotificationsTab(device) {
     { key: "desiccant_due",   label: t("notif.desiccant_due") },
     { key: "bowl_due",        label: t("notif.bowl_due") },
     { key: "housing_due",     label: t("notif.housing_due") },
+    { key: "missed_feed",     label: t("notif.missed_feed") },
     { key: "food_dispensed",  label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",         label: t("notif.offline") },
   ] : [

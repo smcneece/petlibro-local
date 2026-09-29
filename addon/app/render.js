@@ -84,7 +84,7 @@ function renderDevices() {
         : `<div class="card-pet-avatar">🐾</div>`
     ).join("") + (petOverflow > 0 ? `<div class="card-pet-avatar card-pet-overflow">+${petOverflow}</div>` : "");
     const alerts = deviceAlerts(d);
-    const alertDot = alerts.length ? `<div class="card-alert" title="${alerts.join(', ')}">!</div>` : "";
+    const alertDot = alerts.length ? `<div class="card-alert" title="${escHtml(alerts.map(alertLabel).join(', '))}">!</div>` : "";
     const intakeHtml = !isFeeder && d.intake_today_grams > 0
       ? `<div class="card-intake">${escHtml(t("time.today"))}: ${escHtml(fmtWater(d.intake_today_grams))}</div>`
       : "";

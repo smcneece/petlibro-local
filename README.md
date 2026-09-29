@@ -122,7 +122,7 @@ The first time you set up a device, Petlibro Local briefly stops Mosquitto and r
 
 ### Feeder Monitoring
 - Next meal time pulled from the active feeding schedule and shown on the device card, converted to your local timezone
-- Last Fed time: records whenever a qualifying feeding session is detected. The feeder door opens and closes after at least the configured minimum eating duration (default 30 seconds, adjustable per device)
+- Last Fed time: updates whenever food is actually dispensed (scheduled or manual). On the One RFID feeder it also updates when a qualifying eating session is detected, meaning the feeder door opens and closes after at least the configured minimum eating duration (default 30 seconds, adjustable per device)
 - Maintenance reminders: food tank refill (every 14 days by default), desiccant replacement, bowl cleaning (every 7 days), and housing cleaning (every 30 days), with per-device notification toggles and a dedicated Maintenance tab
 - Food tank refill tracking: press "Filled Food Tank" whenever you top it off, and Petlibro Local tracks days since on a configurable interval, independent of the feeder's own grain sensor (which isn't always reliable)
 - Signal strength (RSSI) and firmware version shown in the device modal header
@@ -348,7 +348,7 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Open Door | Button | Opens the feeder lid on demand |
 | Volume | Number (slider) | Speaker volume 0–100 |
 | Food Door | Binary Sensor | Open/closed state of the feeder lid |
-| Last Fed | Sensor | Timestamp of the last detected eating session |
+| Last Fed | Sensor | Timestamp of the last dispense or detected eating session (the Granary Smart Feeder has this sensor too, dispense only) |
 | Last Eating Duration | Sensor | Duration in seconds of the last qualifying feeder door session, RFID or manual |
 | Next Meal | Sensor | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
@@ -357,7 +357,7 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Signal Strength | Sensor (diagnostic) | WiFi RSSI in dBm |
 | Clock Offset | Sensor (diagnostic) | Seconds the device's own clock is behind real time (negative if ahead). Petlibro Local sends a time correction on its own if this passes 30 seconds, so it normally sits near zero |
 
-**Last Fed** updates automatically when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
+**Last Fed** updates automatically when food is dispensed, and also when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
 
 **Next Meal** reflects the next enabled plan from the feeding schedule, recalculated on every device heartbeat.
 

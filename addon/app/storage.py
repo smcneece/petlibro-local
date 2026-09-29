@@ -102,6 +102,7 @@ _DEVICE_DEFAULTS = {
         "housing_due": True,
         "power_battery": True,
         "offline": True,
+        "missed_feed": True,
     },
     "notify_bell": True,
     "notify_email": True,

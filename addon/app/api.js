@@ -70,6 +70,8 @@ function checkAlerts() {
   }
 }
 
+// Alert keys -> display text, looked up in the locale files (alert.<key>) so
+// they translate; the English fallbacks here only cover a missing locale key.
 const _ALERT_LABELS = {
   offline:      "Device offline",
   food_low:     "Food level low",
@@ -79,6 +81,11 @@ const _ALERT_LABELS = {
   bowl_due:     "Bowl cleaning due",
   housing_due:  "Housing cleaning due",
 };
+
+function alertLabel(key) {
+  const s = t(`alert.${key}`);
+  return s !== `alert.${key}` ? s : (_ALERT_LABELS[key] || key);
+}
 
 function openDeviceBySerial(serial) {
   const device = _devices.find(d => d.serial === serial);
@@ -96,7 +103,7 @@ function toggleAlertPanel() {
     if (!alerts.length) continue;
     const name = escHtml(d.name || d.serial?.slice(0, 8) || "Device");
     for (const a of alerts) {
-      const label = escHtml(_ALERT_LABELS[a] || a);
+      const label = escHtml(alertLabel(a));
       const color = a === "offline" ? "var(--pl-danger)" : "var(--pl-warn, #e09a30)";
       rows.push(`<div style="padding:8px 16px;border-bottom:1px solid var(--pl-border);cursor:pointer"
           onclick="openDeviceBySerial('${escHtml(d.serial)}');document.getElementById('alert-panel').style.display='none'">

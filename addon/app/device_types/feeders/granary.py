@@ -14,9 +14,12 @@ Confirmed NOT present in this device's capture, deliberately not built here:
 - No barnDoorState / WAREHOUSE_DOOR_EVENT / SWITCH_DOOR_SERVICE -- this is a
   hopper-style feeder with no openable lid, so no "door_jam" alert either
   (nothing that could pinch a paw the way a hinged door could).
-- No GRAIN_OUTPUT_EVENT (or equivalent) observed, so "Last Fed" time and any
-  eating-session-style logging aren't implemented -- there's no confirmed
-  event to hook into yet, unlike the RFID feeder's door-open-duration proxy.
+- (Superseded 2026-09-29) The original capture showed no GRAIN_OUTPUT_EVENT,
+  but only because it didn't include a feed. A real user's activity log
+  (fw 1.1.15 / hw 1.0.0) shows "Food dispensed" entries for every scheduled
+  feed, so the Granary does report dispenses through the shared handler.
+  Still not built: a Last Fed HA sensor and eating-session logging (no RFID
+  or lid to key off).
 - powerType semantics are NOT assumed to match the RFID feeder's confirmed
   2=battery/3=AC mapping. This capture only ever showed powerType: 1 (no
   battery installed, electricQuantity: 0, matching the cloud integration's
