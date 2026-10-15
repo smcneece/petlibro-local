@@ -207,7 +207,7 @@ async function _saveIcon() {
 
 async function _deleteIcon() {
   if (_editorIconId === null) return;
-  if (!confirm("Delete this icon?")) return;
+  if (!await plConfirm({message: t("icon.delete_confirm"), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
   try {
     await api("DELETE", `/api/icons/${_editorIconId}`);
     _savedIcons = _savedIcons.filter(ic => ic.id !== _editorIconId);
@@ -239,9 +239,12 @@ async function _sendToFeeder() {
 
 let _dragMode = null; // "set" | "clear"
 
+let _gridWired = false;
+
 function _wireGrid() {
   const grid = document.getElementById("ie-grid");
-  if (!grid) return;
+  if (!grid || _gridWired) return;   // the grid element persists, so wire it only once
+  _gridWired = true;
 
   grid.addEventListener("mousedown", e => {
     const cell = e.target.closest("[data-r]");

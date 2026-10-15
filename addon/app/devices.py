@@ -15,6 +15,7 @@ import os
 import aiomqtt
 import device_types as _device_types
 import ha_mqtt
+import polar_control as _polar
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,6 +168,10 @@ _ADDON_START_TS = __import__("time").time()
 _online_since: dict[str, float] = {}
 _missed_feed_alerted: dict[tuple, float] = {}
 _pending_manual_feed: dict[str, float] = {}
+# Polar Wet Food Feeder feed tracking (see polar_control.py). In-memory only on
+# purpose, like _clock_offset: a feed flag resurrected after a restart would
+# block feeding for a feed that is long over.
+_polar_rt: dict[str, dict] = {}
 # Longest observed GRAIN_START -> GRAIN_END gap in real captures was well
 # under 10s; this is a generous window, not a measured firmware timeout.
 _MANUAL_FEED_WINDOW_SECS = 60
@@ -269,7 +274,9 @@ def _mark_online(serial: str):
                 # Feeders are left to _check_device_clock on the next heartbeat
                 # (about a minute away), which holds the correction if it would
                 # skip or repeat a meal. A blind push here could not tell.
-                if device_type not in ("one_rfid", "granary") and _last_seen[serial] - _last_reconnect_push.get(serial, 0.0) >= RECONNECT_PUSH_COOLDOWN_SECS:
+                # The Polar is left out too: its own plans run off its own clock and this
+                # app cannot see them to tell whether a jump would skip one.
+                if device_type not in ("one_rfid", "granary", "polar") and _last_seen[serial] - _last_reconnect_push.get(serial, 0.0) >= RECONNECT_PUSH_COOLDOWN_SECS:
                     _last_reconnect_push[serial] = _last_seen[serial]
                     asyncio.ensure_future(_push_ntp_sync(serial, device_type))
 
@@ -292,6 +299,7 @@ def unregister_device(serial: str):
     _offline_since.pop(serial, None)
     _last_seen.pop(serial, None)
     _alert_sent.pop(serial, None)
+    _polar_rt.pop(serial, None)
     if _reconnect_event:
         _reconnect_event.set()
 
@@ -303,7 +311,7 @@ def get_device_state(serial: str) -> dict:
 def get_all_states() -> dict:
     return {
         serial: {**_state.get(serial, {}), "online": _online.get(serial, False),
-                 "clock_offset_secs": _clock_offset.get(serial)}
+                 "clock_offset_secs": _clock_offset.get(serial), **_polar_view(serial)}
         for serial in _devices
     }
 
@@ -388,7 +396,7 @@ def _granary_settings_bundle(serial: str, overrides: dict) -> dict:
     return bundle
 
 
-async def send_display(serial: str, display_text: str, display_icon: int) -> bool:
+async def send_display(serial: str, display_text: str, display_icon: int, scene: str = "USER_CUSTOM") -> bool:
     """Push display content to the feeder via MQTT.
 
     For text: generates a scrolling bitmap and sends DISPLAY_MATRIX_SERVICE.
@@ -414,6 +422,10 @@ async def send_display(serial: str, display_text: str, display_icon: int) -> boo
     try:
         if display_text:
             frames = dm.text_to_frames(display_text)
+            while len(frames) > 140 and len(display_text) > 1:
+                # More than 140 frames spills into the feeder's pet-name storage.
+                display_text = display_text[:-1]
+                frames = dm.text_to_frames(display_text)
             n = len(frames)
             is_static = n == 1
             chunks = [frames[i:i + _CHUNK] for i in range(0, n, _CHUNK)]
@@ -427,7 +439,7 @@ async def send_display(serial: str, display_text: str, display_icon: int) -> boo
                     "screenDisplayNumber": n,
                     "screenDisplayId": 0,
                     "screenDisplayInterval": 2,
-                    "displayScene": "USER_CUSTOM",
+                    "displayScene": scene,
                     "subNum": sub_num,
                     "subIndex": sub_idx,
                 }
@@ -616,6 +628,16 @@ _THROTTLED_ALERTS = frozenset({
     "water_low", "filter_due", "cleaning_due",
 })
 _ALERT_THROTTLE_SECS = 86400
+# Alerts that were active when the add-on last ran are remembered on disk, so a
+# restart or rebuild does not announce the same still-true alert again (door
+# jam, running on battery, refill due and so on). The memory only suppresses
+# repeats for this long after startup, because right after a restart a device
+# has not reported yet and "not reported" must not be read as "cleared" (that
+# would send a false "AC power restored"), and because an alert that is really
+# gone should be able to fire again later. "offline" is not remembered: the
+# watchdog rebuilds it from scratch after a restart.
+_ALERT_RESTART_GRACE_SECS = 600
+_alert_persisted: dict[str, frozenset] = {}
 
 
 def _compute_device_alerts(serial: str) -> set:
@@ -651,6 +673,18 @@ async def _check_and_fire_alerts(serial: str):
         new_alerts = current - prev
         cleared    = prev - current
         _alert_sent[serial] = current
+        # Restart memory (see _ALERT_RESTART_GRACE_SECS)
+        in_grace   = time.time() - _ADDON_START_TS < _ALERT_RESTART_GRACE_SECS
+        restored   = set(_storage.get_alerts_active(serial)) if in_grace else set()
+        suppressed = new_alerts & restored
+        if suppressed:
+            new_alerts = new_alerts - suppressed
+            _LOGGER.info("Alerts already sent before the restart, not repeating: %s for %s...",
+                         sorted(suppressed), serial[:6])
+        to_save = frozenset((current | restored) - {"offline"})
+        if _alert_persisted.get(serial) != to_save:
+            _storage.save_alerts_active(serial, to_save)
+            _alert_persisted[serial] = to_save
         settings   = _storage.get_settings()
         device_cfg = _storage.get_devices().get(serial, {})
         name       = device_cfg.get("name") or serial[:6]
@@ -752,7 +786,7 @@ async def _publish_ha_state(serial: str):
     try:
         import storage as _storage
         cfg   = _storage.get_devices().get(serial, {})
-        state = _state.get(serial, {})
+        state = {**_state.get(serial, {}), **_polar_view(serial)}
         plans = _storage.get_active_feeding_plans(serial)
         await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans,
                                     clock_offset=_clock_offset.get(serial))
@@ -819,12 +853,204 @@ async def _play_animation_by_name(serial: str, name: str) -> bool:
     return ok
 
 
+# ── Polar Wet Food Feeder (EARLY BETA, see polar_control.py) ───────────────
+
+_POLAR_COMMAND_KEYS = ("_polar_serve", "_polar_stop", "_polar_door", "_polar_plate_position", "_polar_set_duration")
+_POLAR_SERVICE_ACKS = frozenset({
+    "WET_GRAIN_FEEDING_PLAN_SERVICE", "WET_FOOD_FEED_STOP_SERVICE",
+    "SET_PLATE_POS_SERVICE", "SWITCH_DOOR_SERVICE",
+})
+
+
+def _polar_view(serial: str) -> dict:
+    """Feed state for the web UI and Home Assistant; empty for any other device."""
+    if _devices.get(serial, (None, None))[1] != "polar":
+        return {}
+    import time as _t
+    return _polar.public_view(_polar_rt.setdefault(serial, _polar.new_runtime()), _t.time())
+
+
+def _polar_local_now():
+    import datetime as _dt
+    import storage as _storage
+    now = _dt.datetime.now(_dt.timezone.utc)
+    tz_name = _storage.get_settings().get("feeder_timezone", "") or os.environ.get("TZ", "")
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            return now.astimezone(_ZI(tz_name))
+        except Exception:
+            pass
+    return now.astimezone()
+
+
+async def _polar_send(serial: str, payload: dict) -> bool:
+    """Publishes one Polar command. Never retained and never above QoS 0, so a
+    command sent while the feeder is away is dropped, not replayed on reconnect."""
+    if _client_ref is None:
+        return False
+    try:
+        await _client_ref.publish(_service_sub_topic("polar", serial), json.dumps(payload), qos=0, retain=False)
+        _LOGGER.info("Polar %s sent to %s...", payload.get("cmd"), serial[:6])
+        return True
+    except Exception:
+        _LOGGER.exception("Polar %s failed for %s...", payload.get("cmd"), serial[:6])
+        return False
+
+
+async def _polar_echo(topic_str: str, data: dict) -> None:
+    """Answers a Polar event post the way the real cloud does (see polar_control)."""
+    if _client_ref is None:
+        return
+    import time as _t
+    echo = _polar.echo_payload(topic_str, data, int(_t.time() * 1000))
+    if echo is None:
+        return
+    try:
+        await _client_ref.publish(topic_str[:-len("/post")] + "/sub", json.dumps(echo, separators=(",", ":")))
+    except Exception:
+        _LOGGER.debug("Polar echo failed for %s", topic_str)
+
+
+async def _run_polar_command(serial: str, cmd: dict) -> dict:
+    """The one place Polar commands run, for the web UI and Home Assistant alike.
+    Raises PolarError (safe to show the user) when a command is refused."""
+    import time as _t
+    import storage as _storage
+    if not any(k in cmd for k in _POLAR_COMMAND_KEYS):
+        raise _polar.PolarError("That command is not supported for the Polar feeder")
+    now = _t.time()
+    rt = _polar_rt.setdefault(serial, _polar.new_runtime())
+    cfg = _storage.get_devices().get(serial, {})
+
+    if "_polar_set_duration" in cmd:
+        value = cmd["_polar_set_duration"]
+        _polar.validate_settings({"polar_duration_unit": cfg.get("polar_duration_unit"), "polar_serve_duration": value})
+        _storage.save_device(serial, {"polar_serve_duration": value})
+        asyncio.ensure_future(_publish_ha_state(serial))
+        return {"saved": True}
+
+    if not _online.get(serial):
+        raise _polar.PolarError("The Polar feeder is offline, nothing was sent")
+    now_ms = int(now * 1000)
+    result: dict = {}
+
+    if "_polar_serve" in cmd:
+        arg = cmd["_polar_serve"]
+        if not isinstance(arg, dict):
+            raise _polar.PolarError("Serve needs a plate")
+        plate = _polar.validate_plate(arg.get("plate"))
+        value, unit, is_test = _polar.serve_duration(cfg, arg.get("duration"))
+        _polar.check_feed_allowed(rt, now)
+        ok = await _polar_send(serial, _polar.feed_payload(plate, value, _polar_local_now(), now_ms))
+        if ok:
+            _polar.note_feed_requested(rt, plate, value, unit, now)
+            _LOGGER.info("Polar feed requested on %s...: plate %s, duration %s %s%s", serial[:6], plate, value,
+                         unit or "(unit not set)", ", test feed" if is_test else "")
+        result = {"duration": value, "unit": unit, "test": is_test}
+    elif "_polar_stop" in cmd:
+        ok = await _polar_send(serial, _polar.stop_payload(now_ms))
+        if ok:
+            _polar.note_stop_requested(rt, now)
+    elif "_polar_door" in cmd:
+        ok = await _polar_send(serial, _polar.door_payload(bool(cmd["_polar_door"]), now_ms))
+    else:  # _polar_plate_position
+        position = cmd["_polar_plate_position"]
+        payload = _polar.plate_position_payload(position, now_ms)
+        _polar.check_plate_move_allowed(rt, now)
+        ok = await _polar_send(serial, payload)
+        if ok:
+            _polar.note_plate_move(rt, now)
+    if not ok:
+        raise _polar.PolarError("The command could not be sent (no connection to the broker)")
+    asyncio.ensure_future(_publish_ha_state(serial))
+    return result
+
+
+def _handle_polar_message(serial: str, topic_str: str, data: dict, cmd) -> bool:
+    """Polar-only message handling. Returns True when the message is fully dealt
+    with, False to let the shared handler store its fields as usual."""
+    import time as _t
+    rt = _polar_rt.setdefault(serial, _polar.new_runtime())
+    now = _t.time()
+
+    if cmd in ("DEVICE_START_EVENT", "ATTR_PUSH_EVENT"):
+        asyncio.ensure_future(_polar_echo(topic_str, data))
+        return False
+
+    if cmd == "HEARTBEAT":
+        temp = data.get("temperature")
+        if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+            _state.setdefault(serial, {})["temperature"] = temp
+        return False
+
+    if cmd == "GET_FEEDING_PLAN_EVENT":
+        # Echo only, as the real cloud does. This app does not manage the Polar's plans.
+        asyncio.ensure_future(_polar_echo(topic_str, data))
+        _mark_online(serial)
+        return True
+
+    if cmd == "DEVICE_LOG_REPORT_EVENT":
+        _mark_online(serial)
+        return True
+
+    if cmd == "WET_GRAIN_OUTPUT_EVENT":
+        asyncio.ensure_future(_polar_echo(topic_str, data))
+        step = data.get("execStep")
+        _LOGGER.info("Polar feed step from %s...: %s plate=%s finished=%s planId=%s", serial[:6], step,
+                     data.get("plate"), data.get("finished"), data.get("planId"))
+        summary = _polar.on_output_event(rt, data, now)
+        try:
+            import storage as _storage
+            if step == "OPEN_DOOR":
+                _storage.save_device(serial, {"last_fed_ts": int(now)})
+            if summary:
+                _storage.log_feeder_event(serial, "polar_feed", extra={
+                    "source": summary["source"], "plate": summary["plate"],
+                    "requested": summary["requested"], "unit": summary["unit"],
+                    "stopped": summary["stopped"], "door_open_secs": summary["door_open_secs"],
+                })
+        except Exception:
+            _LOGGER.exception("Polar feed log error")
+        if summary:
+            _LOGGER.info("Polar feed finished on %s...: source=%s plate=%s requested=%s %s, door open about %s s%s",
+                         serial[:6], summary["source"], summary["plate"], summary["requested"],
+                         summary["unit"] or "(unit not set)", summary["door_open_secs"],
+                         " (stopped early)" if summary["stopped"] else "")
+            if summary["suggested_unit"]:
+                _LOGGER.info("Polar test feed on %s...: a value of 1 kept the door open about %s s, which suggests the "
+                             "unit is %s. Set it in the device's Overview tab (not applied automatically).",
+                             serial[:6], summary["door_open_secs"], summary["suggested_unit"])
+        _mark_online(serial)
+        asyncio.ensure_future(_publish_ha_state(serial))
+        return True
+
+    if cmd in _POLAR_SERVICE_ACKS:
+        code = data.get("code")
+        (_LOGGER.info if code in (0, None) else _LOGGER.warning)(
+            "Polar %s reply from %s...: code=%s msg=%s", cmd, serial[:6], code, data.get("msg"))
+        _polar.note_service_ack(rt, cmd, code, now)
+        if cmd == "SET_PLATE_POS_SERVICE" and code in (0, None) and isinstance(data.get("platePosition"), int):
+            _state.setdefault(serial, {})["platePosition"] = data["platePosition"]
+        _mark_online(serial)
+        asyncio.ensure_future(_publish_ha_state(serial))
+        return True
+
+    return False
+
+
 async def _handle_ha_command(serial: str, topic: str, payload: str):
     """Route an HA MQTT command to the device."""
     _, device_type = _devices.get(serial, (None, ""))
     cmd = ha_mqtt.parse_command(topic, payload.strip(), device_type=device_type)
     if cmd is None:
         _LOGGER.warning("Unrecognised HA command topic: %s", topic)
+        return
+    if device_type == "polar":
+        try:
+            await _run_polar_command(serial, cmd)
+        except _polar.PolarError as exc:
+            _LOGGER.warning("HA Polar command refused for %s...: %s", serial[:6], exc)
         return
     if cmd.get("_feed_now"):
         ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": 1})
@@ -885,8 +1111,11 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
 
 
-async def handle_ha_command(serial: str, cmd: dict) -> None:
-    """Public entry-point for API-driven commands (already-parsed dict)."""
+async def handle_ha_command(serial: str, cmd: dict):
+    """Public entry-point for API-driven commands (already-parsed dict). Returns a
+    dict of extra details for the Polar feeder, otherwise nothing."""
+    if _devices.get(serial, (None, ""))[1] == "polar":
+        return await _run_polar_command(serial, cmd)
     if cmd.get("_feed_now"):
         ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": 1})
         _LOGGER.info("API Feed Now %s...: %s", serial[:6], "ok" if ok else "failed")
@@ -965,6 +1194,22 @@ async def handle_ha_command(serial: str, cmd: dict) -> None:
         ok = await send_command(serial, payload)
         asyncio.ensure_future(_publish_ha_state(serial))
         _LOGGER.info("API Light Schedule Enabled %s...: %s -> %s", serial[:6], enabled, "ok" if ok else "failed")
+    elif "_send_pet_name" in cmd:
+        # The feeder shows a separate stored PET_NAME scene while it reads a pet's
+        # tag. The Petlibro cloud used to push it (OBSERVED: one DISPLAY_MATRIX_SERVICE
+        # with displayScene PET_NAME, one frame spelling the name). This feeder has
+        # one pet, so this sends the name of the pet assigned to it.
+        import storage as _storage
+        cfg = _storage.get_devices().get(serial, {})
+        pets = _storage.get_pets()
+        pid = next((p for p in cfg.get("pet_ids", []) if p in pets), None)
+        name = (pets.get(pid, {}).get("name") or "").strip()[:20] if pid else ""
+        if not name:
+            raise RuntimeError("no pet with a name is assigned to this feeder")
+        ok = await send_display(serial, name, 0, scene="PET_NAME")
+        _LOGGER.info("API Pet Name %s... (%s): %s", serial[:6], name, "ok" if ok else "failed")
+        if not ok:
+            raise RuntimeError("pet name was not sent")
     elif "_display_animation" in cmd:
         a = cmd["_display_animation"] or {}
         ok = await send_display_frames(serial, a.get("frames"), a.get("interval", 4), bool(a.get("loop", True)))
@@ -1010,8 +1255,15 @@ def _handle_message(serial: str, topic_str: str, raw: str):
     except Exception:
         _LOGGER.debug("Non-JSON from %s...", serial[:6])
         return
+    if not isinstance(data, dict):
+        # valid JSON that is not an object (null, 0, [] ...)
+        _LOGGER.debug("Ignoring a non-object JSON payload from %s...", serial[:6])
+        return
 
     cmd = data.get("cmd")
+
+    if _devices.get(serial, (None, None))[1] == "polar" and _handle_polar_message(serial, topic_str, data, cmd):
+        return
 
     if cmd == "NTP":
         _LOGGER.info("NTP request from %s...", serial[:6])
@@ -1648,6 +1900,8 @@ async def _ack_device_start(serial: str, event_topic: str, data: dict) -> None:
     global _client_ref
     if _client_ref is None:
         return
+    if _devices.get(serial, (None, None))[1] == "polar":
+        return  # answered by _handle_polar_message, in the real cloud's shape
     response_topic = event_topic.replace("/post", "/sub")
     ack = json.dumps({
         "cmd":   "DEVICE_START_EVENT",
@@ -1853,6 +2107,9 @@ async def _respond_ntp(request_topic: str, device_ts_ms=None) -> None:
     # Cloud-style reply (see USE_CLOUD_STYLE_TIME_SYNC): calibrationTag false
     # unless the request's clock is off AND jumping it is safe.
     calibration, send_sync = True, False
+    if _devices.get(serial, (None, None))[1] == "polar":
+        # The real cloud answers a Polar with calibrationTag false (OBSERVED in a relay capture).
+        calibration = False
     if (_uses_cloud_time_sync(serial) and isinstance(device_ts_ms, (int, float)) and device_ts_ms > 1e12):
         import time as _t
         req_offset = round(_t.time() - device_ts_ms / 1000.0)
@@ -2025,6 +2282,8 @@ async def _check_device_clock(serial: str, device_ts_ms) -> None:
     now = _t.time()
     offset = round(now - device_ts_ms / 1000.0)
     _clock_offset[serial] = offset
+    if _devices.get(serial, (None, None))[1] == "polar":
+        return  # reported only, never corrected (see device_types/feeders/polar.py)
     fix = _clock_fix_state.setdefault(serial, {"last_push": 0.0, "tries": 0, "backoff_until": 0.0})
     if abs(offset) <= CLOCK_OFFSET_THRESHOLD_SECS:
         fix["tries"] = 0
@@ -2255,6 +2514,10 @@ async def _mqtt_loop():
             else:
                 await asyncio.sleep(5)
             continue
+        # A deliberate reconnect (a device was added or removed, so the app re-opens
+        # its own broker connection to subscribe again) must not make every device
+        # look offline. Only a real failure or shutdown marks them offline.
+        planned_reconnect = False
         try:
             async with aiomqtt.Client(
                 hostname=_host,
@@ -2298,6 +2561,7 @@ async def _mqtt_loop():
 
                 async for message in client.messages:
                     if _reconnect_event and _reconnect_event.is_set():
+                        planned_reconnect = True
                         break
                     topic_str   = str(message.topic)
                     payload_str = message.payload.decode("utf-8", errors="replace")
@@ -2329,7 +2593,12 @@ async def _mqtt_loop():
                         })
                         _prune_raw_capture(_now)
                         if recognized:
-                            _handle_message(serial, topic_str, payload_str)
+                            # A handler error on one odd message must not end the shared
+                            # broker connection (which would mark every device offline).
+                            try:
+                                _handle_message(serial, topic_str, payload_str)
+                            except Exception:
+                                _LOGGER.exception("Error handling a message from %s... (%s), skipped", serial[:6], topic_str)
                         elif serial not in _unrecognized_serials_seen:
                             _unrecognized_serials_seen.add(serial)
                             _LOGGER.info(
@@ -2345,10 +2614,11 @@ async def _mqtt_loop():
             await asyncio.sleep(10)
         finally:
             _client_ref = None
-            for serial in _devices:
-                _mark_offline(serial)
-            for serial in list(_devices):
-                asyncio.ensure_future(_check_and_fire_alerts(serial))
+            if not planned_reconnect:
+                for serial in _devices:
+                    _mark_offline(serial)
+                for serial in list(_devices):
+                    asyncio.ensure_future(_check_and_fire_alerts(serial))
 
 
 # ── Connection test ────────────────────────────────────────────────────────

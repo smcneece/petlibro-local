@@ -65,6 +65,7 @@ function openDeviceModal(device) {
     if (b.dataset.dtab === "schedule") b.style.display = isFeeder ? "" : "none";
     if (b.dataset.dtab === "led") b.style.display = device.device_type === "one_rfid" ? "" : "none";
     if (b.dataset.dtab === "controls") b.style.display = isFountain ? "" : "none";
+    if (b.dataset.dtab === "maintenance") b.style.display = device.device_type === "polar" ? "none" : "";
   });
 
   renderDeviceTab("overview");
@@ -83,7 +84,7 @@ function renderDeviceTab(tabName) {
   else if (tabName === "maintenance") content.innerHTML = buildMaintenanceTab(_currentDevice);
   else if (tabName === "log") {
     content.innerHTML = `<p style="color:var(--pl-subtext);padding:16px 0;text-align:center">Loading...</p>`;
-    if (_currentDevice.device_type === "one_rfid" || _currentDevice.device_type === "granary") {
+    if (_currentDevice.device_type === "one_rfid" || _currentDevice.device_type === "granary" || _currentDevice.device_type === "polar") {
       api("GET", `/api/devices/${_currentDevice.serial}/feeder-log`)
         .then(log => { content.innerHTML = buildFeederLogTab(_currentDevice, log); })
         .catch(() => { content.innerHTML = `<p style="color:var(--pl-danger);padding:16px 0">${t("device_modal.load_failed_log")}</p>`; });
@@ -115,6 +116,7 @@ function renderDeviceTab(tabName) {
 
 // ── Overview tab ──────────────────────────────────────────────────────────
 function buildOverviewTab(device) {
+  if (device.device_type === "polar") return buildPolarOverview(device);
   const filterDays = filterDaysRemaining(device);
   const filterClass = filterDays != null && filterDays <= 3 ? "danger" : "accent";
   const cleanDays = cleaningDaysRemaining(device);
@@ -429,6 +431,14 @@ function buildLedTab(device) {
         <p class="form-hint">${t("anim.hint")}</p>
         <button class="btn-secondary" id="btn-open-anim-editor" style="width:100%">${t("animed.open")}</button>
       </div>
+      <div class="form-row" style="margin-top:14px">
+        <label class="form-label">${t("petname.heading")}</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="flex:1;font-size:14px">${device.pets && device.pets.length && device.pets[0].name ? escHtml(device.pets[0].name) : `<span style="color:var(--pl-subtext)">${t("petname.none")}</span>`}</span>
+          <button class="btn-secondary" id="btn-send-pet-name" style="flex-shrink:0"${device.pets && device.pets.length && device.pets[0].name ? "" : " disabled"}>${t("petname.send")}</button>
+        </div>
+        <p class="form-hint">${t("petname.hint")}</p>
+      </div>
     </div>`;
 }
 
@@ -661,6 +671,8 @@ function buildFeederLogTab(device, entries) {
     } else if (e.type === "pet_eating") {
       const who = petName ? escHtml(petName) : t("pet.unnamed");
       line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.pet_ate", {name: who, duration: escHtml(fmtDuration(e.duration_secs))})}`;
+    } else if (e.type === "polar_feed") {
+      line = polarLogLine(e);
     } else if (e.type === "door_open") {
       line = `<span style="color:var(--pl-subtext)">${escHtml(fmtTime(e.ts))}</span> ${t("log.door_open", {duration: escHtml(fmtDuration(e.duration_secs))})}`;
     } else {
@@ -1048,7 +1060,7 @@ function wireScheduleTabHandlers() {
       btn.onclick = async () => {
         const idx = +btn.dataset.idx;
         const plan = _schedPlans[idx];
-        if (!confirm(t("schedule.delete_confirm", {time: plan.executionTime}))) return;
+        if (!await plConfirm({message: t("schedule.delete_confirm", {time: plan.executionTime}), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
         _schedPlans.splice(idx, 1);
         await _saveSchedule();
         rerender();
@@ -1143,6 +1155,8 @@ function buildNotificationsTab(device) {
     { key: "missed_feed",     label: t("notif.missed_feed") },
     { key: "food_dispensed",  label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",         label: t("notif.offline") },
+  ] : device.device_type === "polar" ? [
+    { key: "offline",      label: t("notif.offline") },
   ] : [
     { key: "water_low",    label: t("notif.water_low") },
     { key: "filter_due",   label: t("notif.filter_due") },
@@ -1312,6 +1326,7 @@ function wireDeviceTabHandlers(tabName) {
     }
   }
   else if (tabName === "overview") {
+    if (d.device_type === "polar") { wirePolarOverview(d); return; }
     // Feeder controls
     const feedNow = document.getElementById("btn-feed-now");
     const openLid = document.getElementById("btn-open-lid");
@@ -1467,6 +1482,22 @@ function wireDeviceTabHandlers(tabName) {
       };
     }
 
+    const petNameBtn = document.getElementById("btn-send-pet-name");
+    if (petNameBtn) {
+      petNameBtn.onclick = async () => {
+        const orig = petNameBtn.textContent;
+        petNameBtn.textContent = t("overview.sending");
+        petNameBtn.disabled = true;
+        try {
+          await api("POST", `/api/devices/${d.serial}/command`, { _send_pet_name: true });
+          petNameBtn.textContent = t("overview.sent");
+        } catch(e) {
+          petNameBtn.textContent = t("overview.failed");
+          alert(t("overview.cmd_failed", {error: e.message}));
+        }
+        setTimeout(() => { petNameBtn.textContent = orig; petNameBtn.disabled = false; }, 2000);
+      };
+    }
     const openAnimEditorBtn = document.getElementById("btn-open-anim-editor");
     if (openAnimEditorBtn) openAnimEditorBtn.onclick = () => openAnimEditor(d.serial);
     const openIconEditorBtn = document.getElementById("btn-open-icon-editor");

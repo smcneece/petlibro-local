@@ -37,8 +37,8 @@ function renderPets() {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const pet = _pets.find(p => p.id === btn.dataset.petId);
-      const name = pet?.name || "this pet";
-      if (!confirm(`Delete ${name}?`)) return;
+      const name = pet?.name || t("pet.this_pet");
+      if (!await plConfirm({message: t("pet.delete_named", {name}), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
       await api("DELETE", `/api/pets/${btn.dataset.petId}`);
       await refresh();
     });
@@ -232,7 +232,7 @@ async function savePet() {
 }
 
 async function deletePet() {
-  if (!confirm(t("pet.delete_confirm"))) return;
+  if (!await plConfirm({message: t("pet.delete_confirm"), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
   await api("DELETE", `/api/pets/${_editPetId}`);
   document.getElementById("modal-pet").classList.remove("open");
   await refresh();

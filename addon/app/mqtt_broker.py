@@ -8,6 +8,7 @@ No dependencies beyond stdlib -- parses the MQTT 3.1.1 wire format manually.
 
 import asyncio
 import logging
+import re
 import struct
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ class _CaptureProtocol(asyncio.Protocol):
             self._transport.write(CONNACK_ACCEPTED)
             self._transport.close()
 
-            if not _is_petlibro(client_id):
+            if not _is_petlibro(client_id) or not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", client_id):
                 _LOGGER.info(
                     "Capture: skipping non-Petlibro client '%s' — still waiting...",
                     client_id[:16],

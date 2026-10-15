@@ -60,6 +60,21 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
 
+## Polar Wet Food Feeder (early beta)
+
+| Entity | Type | Description |
+|--------|------|-------------|
+| Serve Plate 1, 2, 3 | Button | Serves that plate, using the Serve Duration below |
+| Stop Feed | Button | Stops the feed in progress |
+| Open Lid, Close Lid | Button | Opens or closes the lid |
+| Plate Position | Select | Moves the plate to 1, 2 or 3 |
+| Serve Duration | Number (config) | How long the door stays open. Its unit (seconds or minutes) is set in the app, see the [device notes](devices.md#polar-wet-food-feeder-early-beta). Until a unit is set, Serve sends a test value of 1 whatever this says |
+| Feed Status | Sensor | Idle, or Feeding with the current step |
+| Last Fed | Sensor | When the door last opened for a feed |
+| Last Door Open Time | Sensor (diagnostic) | How long the door stayed open on the last feed, as measured by this app |
+| Temperature | Sensor (diagnostic) | The feeder's inside temperature |
+| Signal Strength, Firmware Version, Hardware Version, Clock Offset | Sensors (diagnostic) | As for the other devices. The clock is only reported, never corrected |
+
 ## Fountains (Dockstream 2 and the other fountain models)
 
 | Entity | Type | Description |

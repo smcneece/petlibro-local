@@ -134,6 +134,10 @@ def _parse_connect(packet: bytes) -> dict:
     flags = packet[off]; off += 3
     client_id, off = _parse_utf8(packet, off)
     username, password = "", ""
+    if flags & 0x04:                       # Will flag: Will Topic and Will Message come first
+        _, off = _parse_utf8(packet, off)
+        will_len = struct.unpack_from(">H", packet, off)[0]
+        off += 2 + will_len
     if flags & 0x80:
         username, off = _parse_utf8(packet, off)
     if flags & 0x40:
@@ -165,7 +169,9 @@ def _parse_subscribe(packet: bytes) -> list:
     return topics
 
 
-def _extract_packets(data: bytes) -> list[tuple[int, bytes]]:
+def _split_packets(data: bytes):
+    """Complete MQTT packets in data, plus the leftover bytes of an incomplete one (a packet
+    can arrive split across several TCP reads)."""
     results = []
     pos = 0
     while pos < len(data):
@@ -174,18 +180,28 @@ def _extract_packets(data: bytes) -> list[tuple[int, bytes]]:
         pkt_type = (data[pos] >> 4) & 0x0F
         try:
             rem_len, consumed = _parse_remaining_length(data, pos + 1)
-        except ValueError:
-            break
+        except ValueError as e:
+            if str(e) == "Bad length":
+                return results, b""        # garbage, drop it
+            break                          # length itself still incomplete
         total = 1 + consumed + rem_len
         if pos + total > len(data):
             break
         results.append((pkt_type, data[pos:pos + total]))
         pos += total
-    return results
+    return results, data[pos:]
+
+
+def _extract_packets(data: bytes) -> list[tuple[int, bytes]]:
+    return _split_packets(data)[0]
 
 
 def _handle_packets(data: bytes, direction: str):
-    for pkt_type, packet in _extract_packets(data):
+    _handle_packet_list(_extract_packets(data), direction)
+
+
+def _handle_packet_list(packets, direction: str):
+    for pkt_type, packet in packets:
         if pkt_type == 3:  # PUBLISH
             try:
                 p = _parse_publish(packet)
@@ -246,6 +262,7 @@ def _handle_packets(data: bytes, direction: str):
 
 
 async def _pipe(reader, writer, direction: str):
+    pending = b""
     try:
         while True:
             data = await reader.read(65536)
@@ -253,7 +270,10 @@ async def _pipe(reader, writer, direction: str):
                 _log(f"[{_ts()}] EOF ({direction})")
                 break
             _log(f"[{_ts()}] RAW ({direction}) {len(data)}b")
-            _handle_packets(data, direction)
+            packets, pending = _split_packets(pending + data)
+            if len(pending) > 1_000_000:
+                pending = b""
+            _handle_packet_list(packets, direction)
             writer.write(data)
             await writer.drain()
     except Exception as e:

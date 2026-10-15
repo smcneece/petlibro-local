@@ -106,7 +106,7 @@ function renderDevices() {
         <div class="card-name">${escHtml(d.name || d.device_type || d.serial)}</div>
         <div class="card-room">${escHtml(d.room || "")}</div>
         <div class="card-stats">
-          ${isFeeder ? `
+          ${d.device_type === "polar" ? polarCardStats(d) : isFeeder ? `
           <div class="card-stat">
             <div class="stat-label">${t("card.food")}</div>
             <div class="stat-value${d.surplusGrain === false ? " danger" : " accent"}">${d.surplusGrain === false ? t("food.low") : d.surplusGrain === true ? t("food.ok") : "—"}</div>

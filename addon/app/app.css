@@ -489,6 +489,15 @@
     margin-bottom: 16px;
   }
   .modal-overlay .modal-title { font-size: 17px; font-weight: 700; }
+
+  /* Confirm dialog (plConfirm in util.js) — above every other modal */
+  .modal-overlay.pl-confirm { z-index: 600; align-items: center; padding: 24px 0; }
+  .pl-confirm .modal { max-width: 420px; width: calc(100% - 32px); border-radius: var(--pl-radius); }
+  .pl-confirm .modal-title { margin-bottom: 12px; }
+  .pl-confirm-msg { font-size: 14px; line-height: 1.5; white-space: pre-line; color: var(--pl-text); }
+  .pl-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  .pl-confirm-actions button { width: auto; margin-top: 0; }
+  .pl-confirm-actions button:focus-visible { outline: 2px solid var(--pl-accent); outline-offset: 2px; }
   .modal {
     background: var(--pl-surface);
     border-radius: var(--pl-radius) var(--pl-radius) 0 0;

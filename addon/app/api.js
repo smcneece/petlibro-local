@@ -23,10 +23,12 @@ async function loadAll() {
 function deviceAlerts(device) {
   const notif = device.notifications || {};
   const alerts = [];
-  if (device.device_type === "one_rfid") {
+  if (device.device_type === "one_rfid" || device.device_type === "granary") {
     if (notif.food_low !== false && device.online && device.surplusGrain === false) alerts.push("food_low");
     if (notif.bowl_due !== false) { const d = bowlDaysRemaining(device); if (d != null && d <= 0) alerts.push("bowl_due"); }
     if (notif.housing_due !== false) { const d = housingDaysRemaining(device); if (d != null && d <= 0) alerts.push("housing_due"); }
+  } else if (device.device_type === "polar") {
+    // nothing besides the offline check below
   } else {
     if (notif.water_low !== false) {
       const threshold = device.lowWater ?? device.low_water_grams ?? 500;
@@ -105,8 +107,7 @@ function toggleAlertPanel() {
     for (const a of alerts) {
       const label = escHtml(alertLabel(a));
       const color = a === "offline" ? "var(--pl-danger)" : "var(--pl-warn, #e09a30)";
-      rows.push(`<div style="padding:8px 16px;border-bottom:1px solid var(--pl-border);cursor:pointer"
-          onclick="openDeviceBySerial('${escHtml(d.serial)}');document.getElementById('alert-panel').style.display='none'">
+      rows.push(`<div class="alert-row" data-serial="${escHtml(d.serial)}" style="padding:8px 16px;border-bottom:1px solid var(--pl-border);cursor:pointer">
         <div style="font-size:13px;font-weight:600">${name}</div>
         <div style="font-size:12px;color:${color};margin-top:2px">${label}</div>
       </div>`);
@@ -116,11 +117,14 @@ function toggleAlertPanel() {
     panel.innerHTML = `<div style="padding:12px 16px;font-size:13px;color:var(--pl-subtext)">No active alerts</div>`;
   } else {
     panel.innerHTML = rows.join("");
+    panel.querySelectorAll(".alert-row").forEach(row => {
+      row.onclick = () => { openDeviceBySerial(row.dataset.serial); panel.style.display = "none"; };
+    });
   }
   panel.style.display = "block";
 
   const close = (e) => {
-    if (!panel.contains(e.target) && e.target.id !== "btn-bell") {
+    if (!panel.contains(e.target) && !e.target.closest("#btn-bell, #fab-bell, #bell-badge, #fab-bell-badge")) {
       panel.style.display = "none";
       document.removeEventListener("click", close, true);
     }

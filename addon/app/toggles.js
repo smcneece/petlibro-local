@@ -44,11 +44,25 @@ async function toggleLightScheduleEnabled(device) {
 }
 
 async function deleteDevice(serial) {
-  if (!confirm(t("device_modal.delete_confirm"))) return;
+  const sure = await plConfirm({
+    title: t("device_modal.delete_title"),
+    message: t("device_modal.delete_confirm"),
+    confirmText: t("device_modal.delete_btn"),
+    cancelText: t("common.cancel"),
+    danger: true,
+  });
+  if (!sure) return;
   const device = _devices.find(d => d.serial === serial);
   let removeCreds = false;
   if (device?.mqtt_user) {
-    removeCreds = confirm(t("device_modal.delete_creds_confirm"));
+    // Cancel side is "keep" and has focus, so only a deliberate click removes the login.
+    removeCreds = await plConfirm({
+      title: t("device_modal.delete_creds_title"),
+      message: t("device_modal.delete_creds_confirm"),
+      confirmText: t("device_modal.delete_creds_remove"),
+      cancelText: t("device_modal.delete_creds_keep"),
+      danger: true,
+    });
   }
   const url = removeCreds ? `/api/devices/${serial}?remove_creds=1` : `/api/devices/${serial}`;
   await api("DELETE", url);

@@ -12,6 +12,8 @@ import json
 import logging
 import time
 
+import polar_control
+
 _LOGGER = logging.getLogger(__name__)
 
 _DISCOVERY_PREFIX = "homeassistant"
@@ -24,6 +26,7 @@ _MODEL_NAMES = {
     "dockstream_rfid":      "Dockstream RFID Smart Fountain",
     "one_rfid":             "One RFID Smart Feeder",
     "granary":              "Granary Smart Feeder",
+    "polar":                "Polar Wet Food Feeder",
 }
 
 _FOUNTAIN_TYPES = {"dockstream2", "dockstream2_cordless", "dockstream_rfid"}
@@ -352,6 +355,76 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
         })))
 
     # ── Granary Smart Feeder (no RFID, no lid) ───────────────────────────────
+    # ── Polar Wet Food Feeder (early beta, see polar_control.py) ─────────────
+    elif device_type == "polar":
+        for plate in polar_control.PLATES:
+            key = f"serve_plate_{plate}"
+            entities.append(("button", key, _e(serial, key, b, {
+                "name":          f"Serve Plate {plate}",
+                "command_topic": cmd_topic(serial, key),
+                "payload_press": "PRESS",
+                "icon":          "mdi:food-drumstick",
+            })))
+        for key, name, icon in (("stop_feed", "Stop Feed", "mdi:stop-circle-outline"),
+                                ("open_lid", "Open Lid", "mdi:door-open"),
+                                ("close_lid", "Close Lid", "mdi:door-closed")):
+            entities.append(("button", key, _e(serial, key, b, {
+                "name":          name,
+                "command_topic": cmd_topic(serial, key),
+                "payload_press": "PRESS",
+                "icon":          icon,
+            })))
+
+        entities.append(("select", "plate_position", _e(serial, "plate_position", b, {
+            "name":          "Plate Position",
+            "state_topic":   state_topic(serial, "plate_position"),
+            "command_topic": cmd_topic(serial, "plate_position"),
+            "options":       [str(p) for p in polar_control.PLATES],
+            "icon":          "mdi:rotate-3d-variant",
+        })))
+
+        unit = polar_control.duration_unit(cfg)
+        duration = {
+            "name":            "Serve Duration" if unit else "Serve Duration (set the unit in the app)",
+            "state_topic":     state_topic(serial, "serve_duration"),
+            "command_topic":   cmd_topic(serial, "serve_duration"),
+            "min":             1,
+            "max":             polar_control.DURATION_UNITS[unit][1] if unit else 600,
+            "step":            1,
+            "mode":            "box",
+            "entity_category": "config",
+            "icon":            "mdi:timer-outline",
+        }
+        if unit:
+            duration["unit_of_measurement"] = "s" if unit == "seconds" else "min"
+        entities.append(("number", "serve_duration", _e(serial, "serve_duration", b, duration)))
+
+        entities.append(("sensor", "feed_status", _e(serial, "feed_status", b, {
+            "name":        "Feed Status",
+            "state_topic": state_topic(serial, "feed_status"),
+            "icon":        "mdi:food-variant",
+        })))
+        entities.append(("sensor", "last_fed", _e(serial, "last_fed", b, {
+            "name":         "Last Fed",
+            "state_topic":  state_topic(serial, "last_fed"),
+            "device_class": "timestamp",
+        })))
+        entities.append(("sensor", "temperature", _e(serial, "temperature", b, {
+            "name":                "Temperature",
+            "state_topic":         state_topic(serial, "temperature"),
+            "unit_of_measurement": "\u00b0C",
+            "device_class":        "temperature",
+            "state_class":         "measurement",
+            "entity_category":     "diagnostic",
+        })))
+        entities.append(("sensor", "last_door_open", _e(serial, "last_door_open", b, {
+            "name":                "Last Door Open Time",
+            "state_topic":         state_topic(serial, "last_door_open"),
+            "unit_of_measurement": "s",
+            "device_class":        "duration",
+            "entity_category":     "diagnostic",
+        })))
+
     elif device_type == "granary":
         entities.append(("sensor", "battery", _e(serial, "battery", b, {
             "name":                "Battery",
@@ -477,6 +550,10 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
         topics.append(cmd_topic(serial, "display_icon"))
         topics.append(cmd_topic(serial, "display_animation"))
         topics.append(cmd_topic(serial, "display_switch"))
+    elif device_type == "polar":
+        for key in ("serve_plate_1", "serve_plate_2", "serve_plate_3", "stop_feed", "open_lid",
+                    "close_lid", "plate_position", "serve_duration"):
+            topics.append(cmd_topic(serial, key))
     elif device_type == "granary":
         topics.append(cmd_topic(serial, "feed_now"))
         topics.append(cmd_topic(serial, "volume"))
@@ -648,6 +725,34 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
             anim_name = NO_ANIMATION_LABEL
         await client.publish(state_topic(serial, "display_animation"), anim_name, retain=True)
 
+    # Polar Wet Food Feeder (early beta, see polar_control.py)
+    elif device_type == "polar":
+        temp = state.get("temperature")
+        if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+            await client.publish(state_topic(serial, "temperature"), str(temp), retain=True)
+
+        status = "Idle"
+        if state.get("polar_feed_active"):
+            step = state.get("polar_feed_step")
+            status = f"Feeding ({step})" if step else "Feeding"
+        await client.publish(state_topic(serial, "feed_status"), status, retain=True)
+
+        last_fed = cfg.get("last_fed_ts")
+        if last_fed:
+            dt = datetime.datetime.fromtimestamp(int(last_fed), tz=datetime.timezone.utc)
+            await client.publish(state_topic(serial, "last_fed"), dt.isoformat(), retain=True)
+
+        last_feed = state.get("polar_last_feed") or {}
+        if last_feed.get("door_open_secs") is not None:
+            await client.publish(state_topic(serial, "last_door_open"), str(last_feed["door_open_secs"]), retain=True)
+
+        pos = state.get("platePosition")
+        if isinstance(pos, int) and not isinstance(pos, bool) and pos in polar_control.PLATES:
+            await client.publish(state_topic(serial, "plate_position"), str(pos), retain=True)
+
+        if cfg.get("polar_serve_duration") is not None:
+            await client.publish(state_topic(serial, "serve_duration"), str(cfg["polar_serve_duration"]), retain=True)
+
     # Granary Smart Feeder (no RFID, no lid, no display -- see device_types
     # module docstring for what's deliberately not implemented and why)
     elif device_type == "granary":
@@ -703,6 +808,30 @@ def parse_command(topic: str, payload: str, device_type: str = "") -> dict | Non
     if len(parts) < 2:
         return None
     key = parts[-2]  # petlibro_local/{serial}/{key}/set
+
+    if device_type == "polar":
+        def _whole(text):
+            try:
+                number = float(text)
+            except (ValueError, TypeError):
+                return None
+            return int(number) if number == int(number) else None
+        if key.startswith("serve_plate_"):
+            plate = _whole(key.rsplit("_", 1)[1])
+            return None if plate is None else {"_polar_serve": {"plate": plate}}
+        if key == "stop_feed":
+            return {"_polar_stop": True}
+        if key == "open_lid":
+            return {"_polar_door": True}
+        if key == "close_lid":
+            return {"_polar_door": False}
+        if key == "plate_position":
+            n = _whole(payload)
+            return None if n is None else {"_polar_plate_position": n}
+        if key == "serve_duration":
+            n = _whole(payload)
+            return None if n is None else {"_polar_set_duration": n}
+        return None
 
     if key == "pump":
         return {"waterStopSwitch": 0 if payload == "ON" else 1}

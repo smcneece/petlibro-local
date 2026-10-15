@@ -1,5 +1,6 @@
 """Supervisor API calls for managing the Mosquitto add-on."""
 
+import asyncio
 import logging
 import os
 
@@ -80,7 +81,7 @@ async def start_mosquitto() -> bool:
     return await _addon_action("start")
 
 
-async def remove_mosquitto_login(username: str) -> str:
+async def _remove_mosquitto_login(username: str) -> str:
     """Remove a login entry from Mosquitto's options.
 
     Returns:
@@ -133,13 +134,18 @@ async def remove_mosquitto_login(username: str) -> str:
         return "error"
 
 
-async def add_mosquitto_login(username: str, password: str) -> str:
+async def _add_mosquitto_login(username: str, password: str, allow_update: bool = False) -> str:
     """Add a login entry to Mosquitto's options and save.
 
+    An existing login with the same username but a different password is only
+    changed when allow_update is True (the caller knows this app created it);
+    otherwise it is left alone and "conflict" is returned.
+
     Returns:
-        "added"  — credentials were new and saved successfully
-        "exists" — credentials already present, no change made
-        "error"  — Supervisor API call failed
+        "added"    — credentials were new and saved successfully
+        "exists"   — credentials already present, no change made
+        "conflict" — username belongs to a login this app did not create, no change made
+        "error"    — Supervisor API call failed
     """
     if not SUPERVISOR_TOKEN:
         _LOGGER.error("SUPERVISOR_TOKEN is not set")
@@ -167,7 +173,10 @@ async def add_mosquitto_login(username: str, password: str) -> str:
                 if entry.get("password") == password:
                     _LOGGER.info("Login for %s... already exists in Mosquitto (unchanged)", username[:4])
                     return "exists"
-                # Same username, different password — update it.
+                if not allow_update:
+                    _LOGGER.warning("Mosquitto login %s... exists and was not created by Petlibro Local, leaving it alone", username[:4])
+                    return "conflict"
+                # Same username, different password, and it is ours — update it.
                 entry["password"] = password
                 _LOGGER.info("Login for %s... exists in Mosquitto — updating password", username[:4])
                 new_options = {**current_opts, "logins": logins}
@@ -203,3 +212,18 @@ async def add_mosquitto_login(username: str, password: str) -> str:
     except Exception:
         _LOGGER.exception("add_mosquitto_login failed")
         return "error"
+
+
+# Both functions read Mosquitto's login list, change it and write it back. Two requests at
+# once (add, delete, resave) could overwrite each other's change, so they take turns.
+_login_lock = asyncio.Lock()
+
+
+async def remove_mosquitto_login(username: str) -> str:
+    async with _login_lock:
+        return await _remove_mosquitto_login(username)
+
+
+async def add_mosquitto_login(username: str, password: str, allow_update: bool = False) -> str:
+    async with _login_lock:
+        return await _add_mosquitto_login(username, password, allow_update)

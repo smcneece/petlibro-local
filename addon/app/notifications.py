@@ -78,8 +78,16 @@ async def _fire_persistent(title: str, message: str, notification_id: str = _NOT
         _LOGGER.exception("Failed to fire persistent notification")
 
 
+_SERVICE_NAME_RE = __import__("re").compile(r"^[a-z0-9_]{1,100}$")
+
+
 async def _fire_notify_service(service: str, title: str, message: str, targets: list,
                                 tag: str = "", clear: bool = False):
+    # The name goes into a URL path on the Home Assistant API, so anything that is
+    # not a plain service name (for example one containing "/" or "..") is refused.
+    if not _SERVICE_NAME_RE.match(service or ""):
+        _LOGGER.warning("Refusing to call a notify service with an invalid name: %r", (service or "")[:40])
+        return
     if clear:
         payload: dict = {"message": "clear_notification", "data": {"tag": tag}}
     elif service.startswith("mobile_app_"):

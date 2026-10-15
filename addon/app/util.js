@@ -23,9 +23,8 @@ async function loadLocale(lang) {
 }
 
 function t(key, vars = {}) {
-  let s = _t[key] || key;
-  for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
-  return s;
+  const s = _t[key] || key;
+  return s.replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m));
 }
 
 function applyI18n() {
@@ -43,6 +42,67 @@ function showToast(msg, durationMs = 2500) {
   el.style.cssText = "position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--pl-surface-2,#2a2a3a);border:1px solid var(--pl-border,#333);border-radius:8px;padding:10px 18px;font-size:13px;z-index:9999;max-width:90vw;text-align:center;pointer-events:none";
   document.body.appendChild(el);
   setTimeout(() => el.remove(), durationMs);
+}
+
+// ── Confirm dialog ────────────────────────────────────────────────────────
+// Our own replacement for the browser's confirm(): resolves true when the confirm
+// button is pressed, false for the cancel button, Escape or a click outside the box.
+// `focus` says which button has keyboard focus when it opens ("cancel" by default),
+// so a stray Enter or Space picks the safe choice.
+function plConfirm({ title = "", message = "", confirmText = "OK", cancelText = "Cancel", danger = false, focus = "cancel" } = {}) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay active pl-confirm";
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    if (title) {
+      const h = document.createElement("div");
+      h.className = "modal-title";
+      h.textContent = title;
+      box.appendChild(h);
+    }
+    const msg = document.createElement("div");
+    msg.className = "pl-confirm-msg";
+    msg.textContent = message;
+    box.appendChild(msg);
+    const row = document.createElement("div");
+    row.className = "pl-confirm-actions";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn-secondary";
+    cancelBtn.textContent = cancelText;
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = danger ? "btn-danger" : "btn-primary";
+    okBtn.textContent = confirmText;
+    row.append(cancelBtn, okBtn);
+    box.appendChild(row);
+    overlay.appendChild(box);
+
+    const previouslyFocused = document.activeElement;
+    const close = result => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+      resolve(result);
+    };
+    const onKey = e => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(false); }
+      else if (e.key === "Tab") {
+        // keep Tab inside the dialog
+        e.preventDefault();
+        (document.activeElement === cancelBtn ? okBtn : cancelBtn).focus();
+      }
+    };
+    cancelBtn.addEventListener("click", () => close(false));
+    okBtn.addEventListener("click", () => close(true));
+    overlay.addEventListener("mousedown", e => { if (e.target === overlay) close(false); });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    (focus === "confirm" ? okBtn : cancelBtn).focus();
+  });
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -65,6 +125,7 @@ const DEVICE_ICONS = {
   dockstream_rfid: "💧",
   one_rfid: "🐾",
   granary: "🥣",
+  polar: "🍲",
 };
 
 const DEVICE_REQUIRES_PET = {

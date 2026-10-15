@@ -178,6 +178,9 @@ const DEVICE_TYPE_MAP = {
   // real MQTT capture -- wire model is PLAF103, same as the box number this
   // time (no discrepancy).
   "AF01": { device_type: "granary",              model: "AF01" },
+  // AF05: Polar Wet Food Feeder (PLAF109), early beta. One owner's serial is
+  // the only evidence for this prefix so far.
+  "AF05": { device_type: "polar",                 model: "AF05" },
 };
 const DEVICE_MQTT_MODELS = {
   "dockstream2":          "plwf106",
@@ -196,6 +199,8 @@ const DEVICE_VARIANTS = {
   // Danny's own unit (issue #8) is white; black is a real retail color too
   // (Petlibro sells almost all their devices in both black and white).
   "granary":              [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
+  // Only black seen so far (one owner); no device photo is bundled for the Polar.
+  "polar":                [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
 };
 
 function deviceImageUrl(deviceType, variant) {

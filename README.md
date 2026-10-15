@@ -2,6 +2,10 @@
 
 > **Setup note:** this is still a young project, though it has been running my own devices since mid-August. You should be comfortable with Home Assistant, Mosquitto broker configuration, and local DNS overrides before attempting setup. Bug reports and feedback are very welcome; please use [GitHub Issues](https://github.com/smcneece/petlibro-local/issues).
 
+> **Credit for the Polar Wet Food Feeder support:** I do not own a Polar, so this early beta was built on other people's open source work. The message formats come mainly from [rgnv/haos-petlibro-local](https://github.com/rgnv/haos-petlibro-local), which documents a capture of the real Petlibro cloud talking to a Polar, and from [gianlucariccobono/petlibro-local](https://github.com/gianlucariccobono/petlibro-local), a fork of this project that added Polar controls and reports testing them on a real feeder. I wrote the code here myself from their published findings, and any mistakes in it are mine. Thank you both. Details and what is still unconfirmed are in the [device notes](docs/devices.md#polar-wet-food-feeder-early-beta).
+
+> **Polar owners, a capture would help:** I have not built feeding schedules for the Polar. It holds three bowls that have to be filled by hand, and wet food does not keep more than a few days even in the fridge, so I rate schedules lower than getting the basics right. The sources I used also disagree on how schedules should be written to the feeder, and on whether the door-open time is in seconds or minutes. If you own a Polar, a capture from the [capture proxy](tools/TOOLS.md) while you use the Petlibro app would settle it: create, edit and delete a schedule, use Feed Now and Stop, open and close the lid, rotate the bowl, set a different door time, and let one scheduled feeding run. The log contains your device's login, so please do not post it. Email it to me at github@mega-city.com instead.
+
 Keep your Petlibro fountains and feeders running entirely on your local network. Petlibro Local intercepts your devices' MQTT credentials during setup, connects them directly to your Home Assistant Mosquitto broker, and gives you desktop and mobile control panel with no Petlibro cloud dependency after that.
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/smcneece/petlibro-local)](https://github.com/smcneece/petlibro-local/releases)
@@ -48,6 +52,7 @@ If you are not comfortable with these terms, do not use this software.
 | Dockstream RFID Smart Fountain | WF02 | PLWF305 | Beta |
 | One RFID Smart Feeder | AF06 | PLAF301 | Supported |
 | Granary Smart Feeder | AF01 | PLAF103 | Beta |
+| Polar Wet Food Feeder | AF05 (from one owner's serial) | PLAF109 | Early beta, see the [device notes](docs/devices.md#polar-wet-food-feeder-early-beta) |
 
 Notes on each model (the Granary's missing lid and RFID, the WF01 labeling, serial color codes, and the model numbers) are in [Supported device notes](docs/devices.md), along with the firmware versions I have seen.
 

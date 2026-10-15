@@ -106,7 +106,7 @@ async function renderAudioLibrary() {
     });
     list.querySelectorAll(".btn-audio-delete").forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm(t("settings.audio_delete_confirm", {name: btn.dataset.name}))) return;
+        if (!await plConfirm({message: t("settings.audio_delete_confirm", {name: btn.dataset.name}), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
         if (_audioPreviewPlayingName === btn.dataset.name) { _audioPreviewEl?.pause(); _setPlayButtonState(null); }
         try {
           await api("DELETE", `/api/audio/${encodeURIComponent(btn.dataset.name)}`);

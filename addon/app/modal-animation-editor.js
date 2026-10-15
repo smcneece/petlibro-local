@@ -145,7 +145,7 @@ function _aeRenderList() {
       x.textContent = "✕";
       x.title = t("animed.del_saved");
       x.onclick = async () => {
-        if (!confirm(t("animed.del_confirm", {name: entry.name}))) return;
+        if (!await plConfirm({message: t("animed.del_confirm", {name: entry.name}), confirmText: t("common.delete"), cancelText: t("common.cancel"), danger: true})) return;
         await api("DELETE", `/api/animations/${entry.id}`);
         if (_aeEditingId === entry.id) _aeEditingId = null;
         _animPresets = null;
@@ -244,8 +244,8 @@ function _aeIsBlank() {
 
 document.addEventListener("DOMContentLoaded", () => {
   const $ = (id) => document.getElementById(id);
-  $("ae-new").onclick = () => {
-    if (!_aeIsBlank() && !confirm(t("animed.new_confirm"))) return;
+  $("ae-new").onclick = async () => {
+    if (!_aeIsBlank() && !await plConfirm({message: t("animed.new_confirm"), confirmText: t("animed.new_btn"), cancelText: t("common.cancel"), danger: true})) return;
     _aeFrames = [[0, 0, 0, 0, 0, 0, 0]];
     _aeIdx = 0;
     _aeEditingId = null;
@@ -292,6 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const url = _aeEditingId ? `/api/animations/${_aeEditingId}` : "/api/animations";
       const r = await api(_aeEditingId ? "PUT" : "POST", url, a);
       _aeEditingId = r.id;
+      if (r.name) $("ae-name").value = r.name;
       _animPresets = null;
       await _aeLoadLibrary();
       _aeMsg(t("animed.saved"));
@@ -328,12 +329,25 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) { /* the JSON is in the box either way */ }
     _aeMsg(t("animed.exported"));
   };
-  const doImport = (text) => {
+  // Import adds the animation to your library under its own name (a number is
+  // added only if that name is already taken). If the library is full it is
+  // still loaded into the editor, unsaved, so nothing is lost.
+  const doImport = async (text) => {
+    let r;
+    try { r = _aeParseImport(text); }
+    catch (e) { _aeMsg(t("animed.err_import", {error: e.message}), true); return; }
+    const name = r.name || t("animed.imported_name");
     try {
-      const r = _aeParseImport(text);
-      _aeLoad({ frames: r.frames, name: r.name, interval: r.interval, custom: false }, true);
-      _aeMsg(t("animed.imported", {n: r.frames.length}));
-    } catch (e) { _aeMsg(t("animed.err_import", {error: e.message}), true); }
+      const saved = await api("POST", "/api/animations", { name, interval: r.interval, frames: r.frames });
+      _animPresets = null;
+      await _aeLoadLibrary();
+      _aeLoad({ frames: r.frames, name: saved.name, interval: r.interval, custom: true, id: saved.id }, false);
+      _aeMsg(t("animed.imported_saved", {n: r.frames.length, name: saved.name}));
+    } catch (e) {
+      _aeLoad({ frames: r.frames, name, interval: r.interval, custom: false }, true);
+      $("ae-name").value = name;
+      _aeMsg(t("animed.imported_unsaved", {n: r.frames.length}), true);
+    }
   };
   $("ae-import").onclick = () => doImport($("ae-json").value);
   $("ae-file").onchange = (e) => {

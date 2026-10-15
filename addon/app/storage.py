@@ -69,6 +69,8 @@ ALLOWED_PET_FIELDS = {
     "no_eat_alert_enabled", "no_eat_alert_hours",
     "notify_eating_activity",
     "no_eat_alerted_for",
+    "polar_duration_unit",
+    "polar_serve_duration",
 }
 
 _DEVICE_DEFAULTS = {
@@ -235,6 +237,44 @@ def save_device_mqtt_cache(serial: str, state: dict):
 
 def get_device_mqtt_cache(serial: str) -> dict:
     return _load().get("_mqtt_cache", {}).get(serial, {})
+
+
+def get_owned_logins() -> set:
+    """Mosquitto logins this app created. Only these may be changed or removed
+    by the app. The first time this is read, every existing device's login is
+    taken as ours (they were all created by Auto Setup or Add Device)."""
+    data = _load()
+    if "_owned_logins" not in data:
+        data["_owned_logins"] = sorted({d.get("mqtt_user") for d in data.get("devices", {}).values() if d.get("mqtt_user")})
+        _save(data)
+    return set(data["_owned_logins"])
+
+
+def add_owned_login(username: str) -> None:
+    owned = get_owned_logins()
+    if username not in owned:
+        data = _load()
+        data["_owned_logins"] = sorted(owned | {username})
+        _save(data)
+
+
+def remove_owned_login(username: str) -> None:
+    owned = get_owned_logins()
+    if username in owned:
+        data = _load()
+        data["_owned_logins"] = sorted(owned - {username})
+        _save(data)
+
+
+def get_alerts_active(serial: str) -> list:
+    """Device alerts that were active when last saved (see devices._check_and_fire_alerts)."""
+    return list(_load().get("_alerts_active", {}).get(serial, []))
+
+
+def save_alerts_active(serial: str, alerts) -> None:
+    data = _load()
+    data.setdefault("_alerts_active", {})[serial] = sorted(alerts)
+    _save(data)
 
 
 def get_alert_last_fired(serial: str) -> dict:
