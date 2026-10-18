@@ -61,6 +61,8 @@ ALLOWED_DEVICE_FIELDS = {
     "display_animation_name",
     "sound_hours_mode", "sound_start_local", "sound_end_local",
     "display_hours_mode", "display_start_local", "display_end_local",
+    "polar_duration_unit", "polar_serve_duration",
+    "wire_model",
 }
 
 ALLOWED_PET_FIELDS = {
@@ -69,9 +71,6 @@ ALLOWED_PET_FIELDS = {
     "no_eat_alert_enabled", "no_eat_alert_hours",
     "notify_eating_activity",
     "no_eat_alerted_for",
-    "polar_duration_unit",
-    "polar_serve_duration",
-    "wire_model",
 }
 
 _DEVICE_DEFAULTS = {

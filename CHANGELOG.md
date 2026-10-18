@@ -2,6 +2,10 @@
 
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
+## 2026.10.5
+- Polar Wet Feeder: the door open time and its unit (seconds or minutes) were never actually saved, so they were blank again after reopening the device, and every serve still sent the test value of 1 (issue #13). They now save and are used for each serve. The same bug kept the app from remembering the model a feeder uses in its messages, which only mattered for feeders it could not already work out from the serial
+- Granary feeders (PLAF103, and the PLAF203 camera feeder) now offer up to 12 portions for Feed Now and schedules, up from 5 (issue #14). Handy for the dual-bowl feeder, which splits each meal between its two bowls. The One RFID feeder stays at 5
+
 ## 2026.10.4
 - When a pet eats after a "has not eaten" alert, the app clears that alert, and it used to send the clear to your mobile device even when mobile was off for that pet. It now clears only where the alert was sent, following the pet's own bell and mobile settings. The clear is silent (it removes the notification and creates none), so you were not getting extra notifications, only a pointless call
 - The add-on log no longer repeats the One RFID feeder's LED display values (`display fields`) after every state poll. They are logged only when one of them changes

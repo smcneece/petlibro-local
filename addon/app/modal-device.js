@@ -185,11 +185,7 @@ function buildOverviewTab(device) {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
         <select class="form-input" id="feeder-portions" style="width:110px">
-          <option value="1" selected>${fmtPortions(1, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="2">${fmtPortions(2, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="3">${fmtPortions(3, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="4">${fmtPortions(4, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="5">${fmtPortions(5, device.calibrated_grams_per_portion, device.feed_unit)}</option>
+          ${_portionRange(device).map(n => `<option value="${n}"${n === 1 ? " selected" : ""}>${fmtPortions(n, device.calibrated_grams_per_portion, device.feed_unit)}</option>`).join("")}
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -268,11 +264,7 @@ function buildOverviewTab(device) {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="white-space:nowrap;font-size:13px;color:var(--pl-subtext)">${t("overview.portions")}</label>
         <select class="form-input" id="feeder-portions" style="width:110px">
-          <option value="1" selected>${fmtPortions(1, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="2">${fmtPortions(2, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="3">${fmtPortions(3, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="4">${fmtPortions(4, device.calibrated_grams_per_portion, device.feed_unit)}</option>
-          <option value="5">${fmtPortions(5, device.calibrated_grams_per_portion, device.feed_unit)}</option>
+          ${_portionRange(device).map(n => `<option value="${n}"${n === 1 ? " selected" : ""}>${fmtPortions(n, device.calibrated_grams_per_portion, device.feed_unit)}</option>`).join("")}
         </select>
         <button class="btn-primary" id="btn-feed-now" style="flex:1">${t("overview.feed_now")}</button>
       </div>
@@ -900,7 +892,7 @@ function buildScheduleTab(plans) {
     <div class="form-row">
       <label>${t("schedule.portions")}</label>
       <div class="portion-chips" id="sf-portions">
-        ${[1,2,3,4,5].map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${escHtml(fmtPortions(n, _currentDevice?.calibrated_grams_per_portion, _currentDevice?.feed_unit))}</div>`).join("")}
+        ${_portionRange(_currentDevice).map(n=>`<div class="portion-chip${n===1?" on":""}" data-n="${n}">${escHtml(fmtPortions(n, _currentDevice?.calibrated_grams_per_portion, _currentDevice?.feed_unit))}</div>`).join("")}
       </div>
     </div>
     <div class="form-row" style="display:flex;align-items:center;gap:10px">

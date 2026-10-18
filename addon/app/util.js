@@ -178,6 +178,13 @@ function fmtCups(n) {
   return `${amount} ${n > 12 ? "cups" : "cup"}`;
 }
 
+// Portions offered for Feed Now and schedules. Granary feeders go to 12 (issue #14,
+// a dual-bowl feeder splits each meal in two); the OneRFID keeps its small bowl's 5.
+function _portionRange(device) {
+  const max = device?.device_type === "granary" ? 12 : 5;
+  return Array.from({ length: max }, (_, i) => i + 1);
+}
+
 function fmtPortions(n, gramsPerPortion, unit) {
   if (unit === "cup") return fmtCups(n);
   if (unit === "ml") return `${Math.round(n * FEED_ML_PER_PORTION * 10) / 10} ml`;
