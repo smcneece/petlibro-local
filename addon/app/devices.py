@@ -16,6 +16,7 @@ import aiomqtt
 import device_types as _device_types
 import ha_mqtt
 import polar_control as _polar
+import water_cap as _water_cap
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,6 +173,8 @@ _pending_manual_feed: dict[str, float] = {}
 # purpose, like _clock_offset: a feed flag resurrected after a restart would
 # block feeding for a feed that is long over.
 _polar_rt: dict[str, dict] = {}
+# Dockstream RFID fountain (newer firmware) drink tracking, see water_cap.py. In memory only.
+_wcap: dict[str, "_water_cap.Tracker"] = {}
 # Longest observed GRAIN_START -> GRAIN_END gap in real captures was well
 # under 10s; this is a generous window, not a measured firmware timeout.
 _MANUAL_FEED_WINDOW_SECS = 60
@@ -304,6 +307,7 @@ def unregister_device(serial: str):
     _alert_sent.pop(serial, None)
     _polar_rt.pop(serial, None)
     _wire_model.pop(serial, None)
+    _wcap.pop(serial, None)
     if _reconnect_event:
         _reconnect_event.set()
 
@@ -1279,8 +1283,15 @@ async def handle_ha_command(serial: str, cmd: dict):
         ok = await send_command(serial, bundle)
         _LOGGER.info("API Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
     else:
-        await send_command(serial, cmd)
+        ok = await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))
+        # Some firmware never reports the filter due date back (issue #12), so what the
+        # user sets is kept here, otherwise Filter Due would stay blank after a reload.
+        due = cmd.get("filterNextReplacementTimestamp")
+        if ok and isinstance(due, (int, float)) and not isinstance(due, bool):
+            _state.setdefault(serial, {})["filterNextReplacementTimestamp"] = due
+            asyncio.ensure_future(_persist_state_cache(serial))
+            asyncio.ensure_future(_publish_ha_state(serial))
 
 
 # ── Message handling ───────────────────────────────────────────────────────
@@ -1404,9 +1415,16 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                                     import notifications as _notif2
                                     import storage as _st2
                                     notif_id = f"petlibro_local_{pet_id[:8]}_no_eat"
+                                    # Clean up only where the alert itself was sent: the pet's own
+                                    # channel settings, the same ones the no-eat alert uses. (This
+                                    # used to force bell and mobile on, so a pet with mobile off
+                                    # still got a mobile "clear" every time it ate.)
+                                    _pet_ch = pets.get(pet_id, {})
                                     asyncio.ensure_future(
-                                        _notif2.dismiss_notification(notif_id, _st2.get_settings(),
-                                                                     {"notify_bell": True, "notify_mobile": True})
+                                        _notif2.dismiss_notification(notif_id, _st2.get_settings(), {
+                                            "notify_bell":   _pet_ch.get("notify_bell", True),
+                                            "notify_mobile": _pet_ch.get("notify_mobile", False),
+                                        })
                                     )
                                 except Exception:
                                     pass
@@ -1460,6 +1478,10 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         }
         _LOGGER.debug("WEIGHT_CLR_SERVICE ack from %s...: code=%s msg=%s", serial[:6], code, msg)
         _mark_online(serial)
+        return
+
+    if cmd == "WATER_CAP_EVENT":
+        _handle_water_cap(serial, data)
         return
 
     if cmd == "WEIGHT_CHANGE_EVENT":
@@ -1605,10 +1627,11 @@ def _handle_message(serial: str, topic_str: str, raw: str):
             skip = skip | {"powerType", "powerMode"}
         partial = {k: v for k, v in data.items() if k not in skip}
         shown = {k: v for k, v in partial.items() if k.startswith("screenDisplay") or k == "enableScreenDisplay"}
-        if shown:
+        if shown and any(_state.get(serial, {}).get(k) != v for k, v in shown.items()):
             # OBSERVED: enableScreenDisplay is whether the LED is lit right now,
-            # screenDisplaySwitch is the setting. Logged so display changes can
-            # be checked against what the feeder reports back.
+            # screenDisplaySwitch is the setting. Logged only when a value changes (the
+            # feeder repeats them in every state poll), so display changes can still be
+            # checked against what the feeder reports back.
             _LOGGER.info("%s from %s... display fields: %s", cmd, serial[:6], shown)
         if partial:
             _, device_type = _devices.get(serial, (None, None))
@@ -1862,6 +1885,27 @@ def _format_local_time(ts_ms: int) -> str:
     else:
         dt = dt.astimezone()
     return dt.strftime("%I:%M:%S %p").lstrip("0")
+
+
+def _handle_water_cap(serial: str, data: dict) -> None:
+    """Newer Dockstream RFID Smart Fountain firmware reports its scale this way
+    (issue #12) and never answers ATTR_GET_SERVICE: the latest reading becomes the
+    water level, and a finished tagged drink goes through the same handler as
+    WEIGHT_CHANGE_EVENT."""
+    tracker = _wcap.setdefault(serial, _water_cap.Tracker())
+    drinks = tracker.feed(data.get("content"))
+    st = _state.setdefault(serial, {})
+    if tracker.latest:
+        st["currentWeight"] = round(tracker.latest["weight"])
+        if tracker.latest["percent"] is not None:
+            st["weightPercent"] = tracker.latest["percent"]
+    for drink in drinks:
+        _LOGGER.info("Fountain drink on %s...: %s g over %s s", serial[:6], drink["fluctuatingWeight"], drink["fluctuatingSeconds"])
+        asyncio.ensure_future(_handle_fountain_drink(serial, drink))
+    _mark_online(serial)
+    asyncio.ensure_future(_check_and_fire_alerts(serial))
+    asyncio.ensure_future(_publish_ha_state(serial))
+    asyncio.ensure_future(_persist_state_cache(serial))
 
 
 async def _handle_fountain_drink(serial: str, data: dict) -> None:

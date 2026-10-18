@@ -116,6 +116,8 @@ Commands on `service/sub`, all `ATTR_SET_SERVICE` unless noted:
 
 State the device reports: `currentWeight` (grams of water), `waterStopSwitch`, `lightSwitch`, `filterNextReplacementTimestamp`, `electricQuantity` (cordless only). The RFID fountain also sends `WEIGHT_CHANGE_EVENT` with the pet tags present and the amount of the drop.
 
+**RFID fountain, newer firmware** (observed once, firmware 1.0.16): it never answers `ATTR_GET_SERVICE` and sends no `WEIGHT_CHANGE_EVENT`. Instead it sends `{"cmd":"WATER_CAP_EVENT","msgId":"..","content":[{"weightPercent":100,"weight":2384,"ts":...,"rfid":""}, ...]}` on `event/post` about every 15 seconds, with around 15 samples one second apart. `weight` is grams on the scale and `rfid` is empty unless a pet's tag is near the bowl. With the reservoir lifted off the weight reads 0 and `weightPercent` 10. A drink shows as samples carrying a tag, then a lower steady weight. It still accepts `ATTR_SET_SERVICE` (light on and off worked, with `code` 0 and an `ATTR_PUSH_EVENT`).
+
 Source: `addon/app/devices.py`, search `_handle_fountain_drink` and `waterStopSwitch`.
 
 ## Polar Wet Food Feeder (PLAF109), early beta
