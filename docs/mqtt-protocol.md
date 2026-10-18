@@ -22,7 +22,7 @@ Everything is under `dl/<model>/<serial>/device/`, where `<model>` is the MQTT m
 | One RFID feeder | AF06 | PLAF301 |
 | Granary Smart Feeder | AF01 | PLAF103 |
 | Polar Wet Food Feeder | AF05 | PLAF109 |
-| Camera feeder (not supported here) | unknown | PLAF203, reported by other projects |
+| Granary Smart Camera Feeder (basic support, no video) | AF03 | PLAF203 |
 
 Each channel has two directions, `post` (the device sends) and `sub` (the cloud, or you, send to the device):
 
@@ -132,7 +132,7 @@ Details and what is unconfirmed are in the [device notes](devices.md#polar-wet-f
 
 ## Camera feeders (PLAF203)
 
-I have not seen one, so I can't vouch for any of this. The model is documented by [rgnv/haos-petlibro-local](https://github.com/rgnv/haos-petlibro-local) and [tannerln7/Petlibro-Home-Assistant](https://github.com/tannerln7/Petlibro-Home-Assistant). One detail from rgnv matters if you build your own server: newer firmware (3.1.49 and later) is reported to wait for a reply to its `BINDING` message, sent on `system/post`, before it sends `DEVICE_START_EVENT`. The reply is `{"cmd":"BINDING","msgId":"<same>","code":0}` on `system/sub`. The video is not carried over MQTT; it uses a separate peer-to-peer connection.
+Petlibro Local has basic support (one owner's capture, nothing else tested), so I can't vouch for most of this. The model is also documented by [rgnv/haos-petlibro-local](https://github.com/rgnv/haos-petlibro-local) and [tannerln7/Petlibro-Home-Assistant](https://github.com/tannerln7/Petlibro-Home-Assistant). One detail from rgnv matters if you build your own server: newer firmware (3.1.49 and later) is reported to wait for a reply to its `BINDING` message, sent on `system/post`, before it sends `DEVICE_START_EVENT`. The reply is `{"cmd":"BINDING","msgId":"<same>","code":0}` on `system/sub`. The video is not carried over MQTT; it uses a separate peer-to-peer connection.
 
 ## Contributing
 

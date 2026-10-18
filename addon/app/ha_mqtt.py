@@ -187,6 +187,9 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "name":                "Water Level",
             "state_topic":         state_topic(serial, "water_level"),
             "unit_of_measurement": "mL",
+            # Stored volume: Home Assistant can show it in fl. oz. (pick the unit in the
+            # entity's settings) while the history stays in mL.
+            "device_class":        "volume_storage",
             "state_class":         "measurement",
             "icon":                "mdi:cup-water",
         })))

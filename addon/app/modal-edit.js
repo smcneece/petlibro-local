@@ -178,6 +178,9 @@ const DEVICE_TYPE_MAP = {
   // real MQTT capture -- wire model is PLAF103, same as the box number this
   // time (no discrepancy).
   "AF01": { device_type: "granary",              model: "AF01" },
+  // AF03: Granary Smart Camera Feeder. Talks on MQTT model PLAF203 (the app learns that
+  // from the device's own messages), otherwise handled as a Granary. No camera video.
+  "AF03": { device_type: "granary",              model: "AF03" },
   // AF05: Polar Wet Food Feeder (PLAF109), early beta. One owner's serial is
   // the only evidence for this prefix so far.
   "AF05": { device_type: "polar",                 model: "AF05" },

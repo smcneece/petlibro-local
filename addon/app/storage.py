@@ -71,6 +71,7 @@ ALLOWED_PET_FIELDS = {
     "no_eat_alerted_for",
     "polar_duration_unit",
     "polar_serve_duration",
+    "wire_model",
 }
 
 _DEVICE_DEFAULTS = {

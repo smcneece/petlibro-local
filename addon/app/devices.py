@@ -207,6 +207,9 @@ def register_device(serial: str, model: str, device_type: str):
     _devices[serial] = (model, device_type)
     try:
         import storage as _storage
+        saved_model = _storage.get_devices().get(serial, {}).get("wire_model")
+        if isinstance(saved_model, str) and _WIRE_MODEL_RE.match(saved_model):
+            _wire_model[serial] = saved_model
         cached = _storage.get_device_mqtt_cache(serial)
         if cached:
             # Disk cache may hold a stale powerType/powerMode from before
@@ -300,6 +303,7 @@ def unregister_device(serial: str):
     _last_seen.pop(serial, None)
     _alert_sent.pop(serial, None)
     _polar_rt.pop(serial, None)
+    _wire_model.pop(serial, None)
     if _reconnect_event:
         _reconnect_event.set()
 
@@ -326,16 +330,48 @@ def _mqtt_model(device_type: str) -> str:
     return _DEVICE_MODELS.get(device_type, device_type)
 
 
+# The model in a device's topics is whatever the device itself uses, which is not
+# always the one its device type assumes: a Granary Smart Camera Feeder (serial
+# AF03) talks on PLAF203 while the Granary type assumes PLAF103, so every command
+# went to a topic the feeder never listens on. The first guess comes from the
+# serial prefix, then from what was learned from the device's own messages
+# (saved with the device, so it also holds right after a restart).
+_PREFIX_WIRE_MODELS = {"AF03": "PLAF203"}
+_WIRE_MODEL_RE = __import__("re").compile(r"^[A-Z0-9]{4,12}$")
+_wire_model: dict[str, str] = {}
+
+
+def _topic_model(device_type: str, serial: str) -> str:
+    return _wire_model.get(serial) or _PREFIX_WIRE_MODELS.get(serial[:4]) or _mqtt_model(device_type)
+
+
+def _learn_wire_model(serial: str, model: str) -> None:
+    """Remember the model a registered device really uses in its topics."""
+    if serial not in _devices or not isinstance(model, str) or not _WIRE_MODEL_RE.match(model):
+        return
+    if _wire_model.get(serial) == model:
+        return
+    previous = _topic_model(_devices[serial][1], serial)
+    _wire_model[serial] = model
+    if previous != model:
+        _LOGGER.info("Device %s... talks on model %s, not %s; commands now go there", serial[:6], model, previous)
+    try:
+        import storage as _storage
+        _storage.save_device(serial, {"wire_model": model})
+    except Exception:
+        _LOGGER.exception("Could not save the model for %s...", serial[:6])
+
+
 def _service_sub_topic(device_type: str, serial: str) -> str:
-    return f"dl/{_mqtt_model(device_type)}/{serial}/device/service/sub"
+    return f"dl/{_topic_model(device_type, serial)}/{serial}/device/service/sub"
 
 
 def _ntp_sub_topic(device_type: str, serial: str) -> str:
-    return f"dl/{_mqtt_model(device_type)}/{serial}/device/ntp/sub"
+    return f"dl/{_topic_model(device_type, serial)}/{serial}/device/ntp/sub"
 
 
 def _event_sub_topic(device_type: str, serial: str) -> str:
-    return f"dl/{_mqtt_model(device_type)}/{serial}/device/event/sub"
+    return f"dl/{_topic_model(device_type, serial)}/{serial}/device/event/sub"
 
 
 # ── Commands ───────────────────────────────────────────────────────────────
@@ -615,7 +651,7 @@ async def send_feeding_plans(serial: str, plans: list) -> bool:
 # ── Alert logic ────────────────────────────────────────────────────────────
 
 _PROTO_FIELDS     = frozenset({"cmd", "msgId", "code", "ts"})
-_SENSITIVE_FIELDS = frozenset({"wifiSsid", "wifiPassword", "audioUrl"})
+_SENSITIVE_FIELDS = frozenset({"wifiSsid", "wifiPassword", "audioUrl", "cameraAuthInfo"})
 
 # "Due"/level-style alerts stay true for days until the user acts on them, so
 # a fresh "new" edge can reappear after any add-on restart (_alert_sent is
@@ -1445,7 +1481,10 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         # observed -- treating it as the door-jam signal for now, but other
         # error codes may exist and could mean something unrelated.
         error_code = data.get("errorCode")
-        _LOGGER.info("ERROR_EVENT from %s...: errorCode=%s", serial[:6], error_code)
+        # 2048 arrives about every 30 minutes from a camera feeder (PLAF203) and carries
+        # camera exposure data (the reporter's reading, not confirmed), so it is not logged.
+        if error_code != 2048:
+            _LOGGER.info("ERROR_EVENT from %s...: errorCode=%s", serial[:6], error_code)
         if error_code == 2032:
             _state.setdefault(serial, {})["_door_jam_pending"] = True
         _mark_online(serial)
@@ -1740,9 +1779,10 @@ async def _send_feeder_hours(serial: str, prefix: str, req: dict) -> bool:
     _storage.save_device(serial, {mode_key: mode, **({start_key: start, end_key: end} if start and end else {})})
     fields = {f"{prefix}AgingType": 2 if mode == "custom" else 1}
     if start and end:
+        browser_tz = req.get("tz") or ""
         fields.update({
-            f"{prefix}StartTime": start, f"{prefix}StartTimeUtc": _local_hhmm_to_utc(start),
-            f"{prefix}EndTime": end,     f"{prefix}EndTimeUtc": _local_hhmm_to_utc(end),
+            f"{prefix}StartTime": start, f"{prefix}StartTimeUtc": _local_hhmm_to_utc(start, browser_tz),
+            f"{prefix}EndTime": end,     f"{prefix}EndTimeUtc": _local_hhmm_to_utc(end, browser_tz),
         })
         if prefix == "sound":
             fields["soundTimes"] = _raw_minutes_between(start, end)
@@ -1777,15 +1817,23 @@ async def _send_feeder_hours(serial: str, prefix: str, req: dict) -> bool:
     return ok
 
 
-def _local_hhmm_to_utc(hhmm: str) -> str:
+_TZ_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}$")
+
+
+def _local_hhmm_to_utc(hhmm: str, fallback_tz: str = "") -> str:
     """Converts an "HH:MM" local-time string to "HH:MM" UTC, using the same
     feeder_timezone setting the feeding-schedule editor uses. Mirrors
     util.js's _localToUtc so the fountain light schedule is entered and
     displayed in local time but sent to the device in UTC, same as the
-    feeder's feeding plan times."""
+    feeder's feeding plan times. The editor falls back to the browser's
+    timezone when the setting was never saved, so callers can pass that as
+    fallback_tz; without it an unsaved setting meant no conversion at all,
+    and a sound or LED window was sent with local times labeled as UTC."""
     import datetime as _dt
     import storage as _storage
     tz_name = _storage.get_settings().get("feeder_timezone", "")
+    if not tz_name and isinstance(fallback_tz, str) and len(fallback_tz) <= 64 and _TZ_NAME_RE.match(fallback_tz):
+        tz_name = fallback_tz
     offset_hours = 0.0
     if tz_name:
         try:
@@ -2538,7 +2586,7 @@ async def _mqtt_loop():
                 await client.subscribe("dl/#")
 
                 for serial, (_, device_type) in list(_devices.items()):
-                    _LOGGER.info("Registered: %s... model=%s", serial[:6], _mqtt_model(device_type))
+                    _LOGGER.info("Registered: %s... model=%s", serial[:6], _topic_model(device_type, serial))
                     svc_topic    = _service_sub_topic(device_type, serial)
                     init_payload = json.dumps({
                         "cmd":   "ATTR_GET_SERVICE",
@@ -2584,6 +2632,8 @@ async def _mqtt_loop():
                     if parts[0] == "dl" and len(parts) >= 4 and topic_str.endswith("/post"):
                         serial = parts[2]
                         recognized = serial in _devices
+                        if recognized:
+                            _learn_wire_model(serial, parts[1])
                         _now = _time.time()
                         _raw_capture.append({
                             "ts":         _now,

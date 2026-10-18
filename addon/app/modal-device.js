@@ -1236,7 +1236,9 @@ function _wireHours(d, id, cmdKey, fields) {
     applyEl.textContent = t("overview.sending");
     applyEl.disabled = true;
     try {
-      await api("POST", `/api/devices/${d.serial}/command`, { [cmdKey]: { mode, start, end } });
+      // Same timezone the schedule editor converts with (the setting, else this browser's).
+      const tz = _settings.feeder_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      await api("POST", `/api/devices/${d.serial}/command`, { [cmdKey]: { mode, start, end, tz } });
       _patchDevice(d.serial, { [fields[0]]: mode, [fields[1]]: start, [fields[2]]: end });
       applyEl.textContent = t("overview.sent");
     } catch(e) {
