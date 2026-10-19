@@ -310,9 +310,30 @@ def get_active_feeding_plans(serial: str) -> list:
     return [] if schedules_paused(serial) else get_device_feeding_plans(serial)
 
 
-def save_device_feeding_plans(serial: str, plans: list):
+_KEEP = object()
+
+
+def save_device_feeding_plans(serial: str, plans: list, tz_basis=_KEEP):
+    """Store a device's plans. tz_basis ({"tz", "offset", "at", ...}) records the
+    timezone and UTC offset the plans' UTC executionTime values were computed for, so
+    they can be shifted when that offset changes (daylight saving). None clears it
+    (conversion basis unknown: no automatic shifting); leaving it out keeps it."""
     data = _load()
     data.setdefault("_feeding_plans", {})[serial] = plans
+    if tz_basis is None:
+        data.get("_feeding_plans_tz", {}).pop(serial, None)
+    elif tz_basis is not _KEEP:
+        data.setdefault("_feeding_plans_tz", {})[serial] = tz_basis
+    _save(data)
+
+
+def get_feeding_plans_tz_basis(serial: str) -> dict | None:
+    return _load().get("_feeding_plans_tz", {}).get(serial)
+
+
+def set_feeding_plans_tz_basis(serial: str, tz_basis: dict):
+    data = _load()
+    data.setdefault("_feeding_plans_tz", {})[serial] = tz_basis
     _save(data)
 
 

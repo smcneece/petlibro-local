@@ -101,7 +101,7 @@ function renderDeviceTab(tabName) {
   }
   else if (tabName === "schedule") {
     content.innerHTML = `<p style="color:var(--pl-subtext);padding:16px 0;text-align:center">Loading...</p>`;
-    api("GET", `/api/devices/${_currentDevice.serial}/feeding-plans`)
+    _loadSchedule()
       .then(plans => {
         _schedPlans = plans;
         content.innerHTML = buildScheduleTab(plans);
@@ -947,9 +947,38 @@ function buildScheduleTab(plans) {
 
 // In-memory plans for schedule tab editing
 let _schedPlans = [];
+let _schedRevision = null;   // revision of the plans in _schedPlans (X-Plan-Revision)
+
+// Loads the plans together with their revision; the two always travel as a pair.
+async function _loadSchedule() {
+  const r = await fetch(`${BASE}/api/devices/${_currentDevice.serial}/feeding-plans`);
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  const plans = await r.json();
+  _schedRevision = r.headers.get("X-Plan-Revision");   // only together with the plans
+  return plans;
+}
 
 async function _saveSchedule() {
-  const ok = await api("POST", `/api/devices/${_currentDevice.serial}/feeding-plans`, _schedPlans).catch(() => null);
+  // The server refuses (409) if the plans changed since they were loaded (e.g. a
+  // daylight saving shift); then reload instead of overwriting that change.
+  const rev = _schedRevision ? `?revision=${encodeURIComponent(_schedRevision)}` : "";
+  const ok = await api("POST", `/api/devices/${_currentDevice.serial}/feeding-plans${rev}`, _schedPlans).catch(e => {
+    if (String(e.message).startsWith("409")) {
+      alert(String(e.message).slice(4).trim() || t("device_modal.schedule_reload_changed"));
+      renderDeviceTab("schedule");
+    }
+    return null;
+  });
+  // The server may adjust what was saved: continue from its list and revision.
+  // An edit form opened meanwhile points at a row index of the old list, so
+  // close it rather than let it write onto whatever is at that index now.
+  if (ok) {
+    _schedPlans = await _loadSchedule().catch(() => _schedPlans);
+    const form = document.getElementById("sched-form");
+    if (form) form.classList.remove("open");
+    const idx = document.getElementById("sf-edit-idx");
+    if (idx) idx.value = "";
+  }
   return ok;
 }
 

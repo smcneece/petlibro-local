@@ -634,6 +634,9 @@ async def send_feeding_plans(serial: str, plans: list) -> bool:
         _LOGGER.warning("send_feeding_plans: no MQTT client")
         return False
     import storage as _storage
+    if (_storage.get_feeding_plans_tz_basis(serial) or {}).get("pending_sync"):
+        _recheck_pending(serial, int(time.time() * 1000))   # DST shift not acked yet
+        plans = _storage.get_device_feeding_plans(serial)
     if _storage.schedules_paused(serial):
         plans = []
     clean = _wire_plans(plans)
@@ -650,6 +653,305 @@ async def send_feeding_plans(serial: str, plans: list) -> bool:
     except Exception:
         _LOGGER.exception("Failed to send feeding plans to %s...", serial[:6])
         return False
+
+
+# ── Daylight saving: keep plans on local time ──────────────────────────────
+# Plan executionTime is UTC on the wire (confirmed on a One RFID, fw 3.0.72: a plan
+# sent as "17:54" fired at 19:54 CEST). The schedule editor converts local->UTC once,
+# with the offset of the moment the plan is saved, so after a DST change every plan
+# would fire an hour early or late. Each device remembers the timezone + offset its
+# plans were computed for; when that zone's offset changes, the plans are shifted by
+# the difference and re-sent until the feeder acks them.
+#
+# Only the timezone saved in Settings is used (the editor's fallback is the browser
+# zone, which the server cannot know). Changing the timezone in Settings keeps the
+# UTC times; plans saved before this feature are taken as correct for the current
+# offset.
+#
+# Fall back moves meals later. If a meal's old time has passed (or is less than 2
+# minutes away) but its new time has not (a meal inside the repeated hour, or a shift
+# that reached the feeder late), the new time is skipped once (skipEndTime) so the
+# cat is not fed twice. Until the feeder acks, the old list may still be active, so
+# this is re-checked before every send, also when the schedule is edited meanwhile
+# (only for meals the user did not move). Best effort: a lost ack, or a list landing
+# just before the old time, can cost a meal instead.
+# Spring forward moves meals earlier; a meal whose new time passed before the shift
+# landed does not run that day (logged).
+
+import re as _re_dst
+_PLAN_TIME_RE = _re_dst.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
+_PLAN_RESEND_SECS = 300
+_RUN_MARGIN_MS = 120000
+
+
+def current_plan_tz_basis() -> dict | None:
+    """{"tz", "offset" (seconds), "at" (ms)} for the timezone saved in Settings, or
+    None when it is not set or cannot be resolved."""
+    import datetime as _dt
+    import time as _time
+    import storage as _storage
+    tz_name = (_storage.get_settings().get("feeder_timezone") or "").strip()
+    if not tz_name:
+        return None
+    now = _time.time()
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        offset = _dt.datetime.fromtimestamp(now, _ZI(tz_name)).utcoffset()
+    except Exception:
+        return None
+    if offset is None:
+        return None
+    return {"tz": tz_name, "offset": int(offset.total_seconds()), "at": int(now * 1000)}
+
+
+def _plans_valid(plans) -> bool:
+    if not isinstance(plans, list):
+        return False
+    for p in plans:
+        if not isinstance(p, dict) or not isinstance(p.get("executionTime"), str):
+            return False
+        if not _PLAN_TIME_RE.fullmatch(p["executionTime"]):
+            return False
+        days = p.get("repeatDay", [])
+        if not isinstance(days, list) or not all(isinstance(d, int) and not isinstance(d, bool) and 1 <= d <= 7 for d in days):
+            return False
+    return True
+
+
+def shift_plan_times(plans: list, delta_minutes: int) -> list:
+    """Plans with every executionTime moved by -delta_minutes (UTC). delta_minutes is
+    new_offset - old_offset, so going from UTC+2 to UTC+1 (-60) moves 05:00 to 06:00.
+    A time that crosses midnight also moves its repeatDay weekdays by one. Expects
+    plans that passed _plans_valid."""
+    out = []
+    for p in plans:
+        q = dict(p)
+        h, m = (int(x) for x in p["executionTime"].split(":"))
+        total = h * 60 + m - delta_minutes
+        day_shift = total // 1440          # -1, 0 or +1
+        total %= 1440
+        q["executionTime"] = f"{total // 60:02d}:{total % 60:02d}"
+        days = q.get("repeatDay")
+        if day_shift and days and len(set(days)) < 7:
+            q["repeatDay"] = sorted({((d - 1 + day_shift) % 7) + 1 for d in days})
+        out.append(q)
+    return out
+
+
+def _occurrences_ms(plan: dict, now_ms: int) -> list:
+    """UTC instants (ms) of a plan's runs yesterday, today and tomorrow (UTC dates):
+    enough to pair every meal with its shifted partner across UTC midnight."""
+    import datetime as _dt
+    h, m = (int(x) for x in plan["executionTime"].split(":"))
+    today = _dt.datetime.fromtimestamp(now_ms / 1000, _dt.timezone.utc).date()
+    out = []
+    for back in (1, 0, -1):
+        day = today - _dt.timedelta(days=back)
+        if plan.get("repeatDay") and day.weekday() + 1 not in plan["repeatDay"]:
+            continue
+        out.append(int(_dt.datetime(day.year, day.month, day.day, h, m, tzinfo=_dt.timezone.utc).timestamp() * 1000))
+    return out
+
+
+def _skip_repeats(serial: str, old_plans: list, new_plans: list, delta_min: int, now_ms: int) -> bool:
+    """Set skipEndTime on new plans whose old occurrence has passed while the shifted
+    one is still ahead (would feed twice). Logs spring-forward meals lost the same way.
+    Mutates new_plans; True when any skipEndTime changed."""
+    import storage as _storage
+    changed = False
+    old_by_id = {p.get("planId"): p for p in old_plans}
+    for p in new_plans:
+        old = old_by_id.get(p.get("planId"))
+        if old is None or not old.get("_enabled", True) or not _plans_valid([old]):
+            continue
+        partner = shift_plan_times([old], delta_min)[0]
+        if (p.get("executionTime"), sorted(p.get("repeatDay") or [])) != \
+                (partner["executionTime"], sorted(partner.get("repeatDay") or [])):
+            continue   # the user moved this meal since: not the same meal any more
+        for o in _occurrences_ms(old, now_ms):
+            n = o - delta_min * 60000      # the same meal after the shift
+            if _storage.occurrence_skipped(old, o / 1000):
+                continue
+            # "may have run": also within _RUN_MARGIN_MS before its time, since a list
+            # sent just before can reach the feeder after the old meal already fired
+            if n > o and o - _RUN_MARGIN_MS <= now_ms < n:
+                end = n + 60000
+                if int(p.get("skipEndTime") or 0) < end:
+                    p["skipEndTime"] = end
+                    changed = True
+                    _LOGGER.info("Plan %s of %s...: its old time %s UTC may have run, skipping today's %s UTC so it is not fed twice",
+                                 p.get("planId"), serial[:6], old["executionTime"], p["executionTime"])
+            elif n < o and n <= now_ms < o:
+                _LOGGER.warning("Plan %s of %s...: its shifted time %s UTC is already past; no catch-up meal is scheduled",
+                                p.get("planId"), serial[:6], p["executionTime"])
+    return changed
+
+
+def _reconcile_device_storage(serial: str, basis: dict, now_ms: int) -> bool:
+    """Storage half of the reconcile for one device (no awaits): shift the stored
+    plans if the timezone's UTC offset changed. True when it shifted them."""
+    import storage as _storage
+    if _devices.get(serial, (None, None))[1] == "polar":
+        return None  # Polar uses dated plans of its own (polar_control)
+    plans = _storage.get_device_feeding_plans(serial)
+    if not plans:
+        return False
+    old = _storage.get_feeding_plans_tz_basis(serial)
+    if not old or old.get("tz") != basis["tz"]:
+        if old is None:
+            _LOGGER.info("Plans of %s... have no timezone basis yet; taking them as correct for %s (UTC%+.1f)",
+                         serial[:6], basis["tz"], basis["offset"] / 3600)
+        else:
+            _LOGGER.info("Feeder timezone changed %s -> %s: plans of %s... keep their UTC times",
+                         old.get("tz"), basis["tz"], serial[:6])
+        # keep any pending delivery; only the conversion basis changes
+        _storage.set_feeding_plans_tz_basis(serial, {**(old or {}), "tz": basis["tz"], "offset": basis["offset"], "at": now_ms})
+        return False
+    if old.get("offset") == basis["offset"]:
+        return False
+    if not _plans_valid(plans) or not isinstance(old.get("offset"), int):
+        _LOGGER.warning("Plans of %s... not shifted for the UTC offset change: stored plans or basis are malformed", serial[:6])
+        return False
+    delta_min = (basis["offset"] - old["offset"]) // 60
+    new_plans = shift_plan_times(plans, delta_min)
+    # The feeder still runs the list it last acked. Normally that is `plans`; while a
+    # previous shift is unacked it may still be the one before it.
+    prev = old.get("prev") if old.get("pending_sync") else None
+    if prev:
+        prev = {"plans": prev["plans"], "delta": prev["delta"] + delta_min}
+    else:
+        prev = {"plans": plans, "delta": delta_min}
+    _skip_repeats(serial, prev["plans"], new_plans, prev["delta"], now_ms)
+    for p in new_plans:
+        p["syncTime"] = now_ms
+    new_basis = {"tz": basis["tz"], "offset": basis["offset"], "at": now_ms}
+    if any(p.get("_enabled", True) for p in new_plans):
+        new_basis.update(pending_sync=now_ms, last_sent=0, prev=prev)
+    _storage.save_device_feeding_plans(serial, new_plans, tz_basis=new_basis)
+    _LOGGER.info("UTC offset of %s changed %+d min: shifted %d plan(s) for %s... %s -> %s",
+                 basis["tz"], delta_min, len(new_plans), serial[:6],
+                 [p.get("executionTime") for p in plans], [p.get("executionTime") for p in new_plans])
+    return True
+
+
+def _recheck_pending(serial: str, now_ms: int) -> None:
+    """Before (re)sending unacked shifted plans: re-run the double-feed check against
+    the list the feeder may still be running. A changed payload gets a new syncTime
+    so an ack for the earlier payload cannot clear it."""
+    import storage as _storage
+    b = _storage.get_feeding_plans_tz_basis(serial) or {}
+    prev = b.get("prev")
+    if not b.get("pending_sync") or not prev:
+        return
+    plans = _storage.get_device_feeding_plans(serial)
+    if _skip_repeats(serial, prev["plans"], plans, prev["delta"], now_ms):
+        sync = max(now_ms, int(b["pending_sync"]) + 1)
+        for p in plans:
+            p["syncTime"] = sync
+        b["pending_sync"] = sync
+        _storage.save_device_feeding_plans(serial, plans, tz_basis=b)
+
+
+def prepare_plans_for_feeder(serial: str) -> None:
+    """Bring stored plans up to date before they go to a feeder: shift for an offset
+    change, then re-check unacked shifted plans."""
+    import time as _time
+    now_ms = int(_time.time() * 1000)
+    basis = current_plan_tz_basis()
+    if basis is not None:
+        _reconcile_device_storage(serial, basis, now_ms)
+    _recheck_pending(serial, now_ms)
+
+
+def plan_revision(serial: str) -> str:
+    """Opaque revision of a device's stored plans plus the Settings timezone they are
+    converted with; the schedule editor sends it back so a stale save is refused."""
+    import hashlib
+    import storage as _storage
+    b = current_plan_tz_basis()
+    ctx = {"tz": b["tz"], "offset": b["offset"]} if b else None
+    raw = json.dumps([_storage.get_device_feeding_plans(serial), ctx], sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def accept_plan_edit(serial: str, plans: list, revision: str | None, now_ms: int) -> str | None:
+    """Checks and stores a schedule saved in the editor. Returns a reason to refuse
+    it (HTTP 409), or None once it is stored and ready to send.
+
+    - revision (from GET's X-Plan-Revision; None = old client, not checked): the
+      stored plans or the Settings timezone changed since the editor loaded them,
+      e.g. a DST shift or a double-feed skip added since, so its list is stale.
+    - While shifted plans are unacked the feeder may still run its old list: keep
+      that uncertainty (prev), guard the saved plans and give them a new syncTime.
+      Removing a skip the guard still needs is refused.
+    """
+    import copy
+    import storage as _storage
+    prepare_plans_for_feeder(serial)   # a due DST shift lands before the comparison
+    if revision is not None and revision != plan_revision(serial):
+        return "Schedule changed since you opened it; reload and try again."
+    basis = current_plan_tz_basis()
+    b = _storage.get_feeding_plans_tz_basis(serial) or {}
+    prev = b.get("prev") if b.get("pending_sync") else None
+    if prev:
+        if _skip_repeats(serial, prev["plans"], copy.deepcopy(plans), prev["delta"], now_ms):
+            return ("This meal is skipped once so it is not fed twice after the clock change; "
+                    "the skip cannot be removed until the feeder confirms the new times.")
+        sync = max(now_ms, int(b["pending_sync"]) + 1)
+        for p in plans:
+            p["syncTime"] = sync
+        # kept even when every plan is now disabled: re-enabling must still be guarded
+        basis = {**(basis or {"tz": None, "offset": None, "at": now_ms}),
+                 "pending_sync": sync, "last_sent": now_ms, "prev": prev}
+    _storage.save_device_feeding_plans(serial, plans, tz_basis=basis)
+    return None
+
+
+async def reconcile_plan_timezones() -> None:
+    """Shift stored plans when the Settings timezone's UTC offset changed since they
+    were saved (DST), and re-send shifted plans to online devices every 5 minutes
+    until the feeder acks them. Runs every minute from the watchdog, also while MQTT
+    is down (storage only then)."""
+    import time as _time
+    import storage as _storage
+    now_ms = int(_time.time() * 1000)
+    basis = current_plan_tz_basis()
+    for serial in list(_devices):
+        try:
+            if basis is not None:
+                _reconcile_device_storage(serial, basis, now_ms)
+            b = _storage.get_feeding_plans_tz_basis(serial) or {}
+            if not b.get("pending_sync") or _storage.schedules_paused(serial):
+                continue  # paused: resume re-sends all plans
+            if not any(p.get("_enabled", True) for p in _storage.get_device_feeding_plans(serial)):
+                continue  # nothing enabled to deliver; keep the uncertainty for re-enabling
+            if _client_ref is None or not _online.get(serial):
+                continue  # offline: the feeder gets them when it asks for its plans
+            if now_ms - int(b.get("last_sent") or 0) < _PLAN_RESEND_SECS * 1000:
+                continue
+            b["last_sent"] = now_ms
+            _storage.set_feeding_plans_tz_basis(serial, b)
+            await send_feeding_plans(serial, _storage.get_device_feeding_plans(serial))
+            asyncio.ensure_future(publish_ha_state(serial))
+        except Exception:
+            _LOGGER.exception("Plan timezone reconcile failed for %s...", serial[:6])
+
+
+def _plan_ack_received(serial: str, acked_plans) -> None:
+    """Clear a pending re-send once the feeder acks every enabled plan with the
+    pending syncTime."""
+    import storage as _storage
+    b = _storage.get_feeding_plans_tz_basis(serial)
+    if not b or not b.get("pending_sync") or not isinstance(acked_plans, list):
+        return
+    expected = {(p.get("planId"), b["pending_sync"])
+                for p in _storage.get_device_feeding_plans(serial) if p.get("_enabled", True)}
+    received = {(p.get("planId"), p.get("syncTime")) for p in acked_plans if isinstance(p, dict)}
+    if expected and expected <= received:   # an empty list proves nothing
+        for k in ("pending_sync", "last_sent", "prev"):
+            b.pop(k, None)
+        _storage.set_feeding_plans_tz_basis(serial, b)
+        _LOGGER.info("Shifted plans acked by %s...", serial[:6])
 
 
 # ── Alert logic ────────────────────────────────────────────────────────────
@@ -1337,6 +1639,8 @@ def _handle_message(serial: str, topic_str: str, raw: str):
         code = data.get("code")
         plans = data.get("plans", [])
         _LOGGER.info("FEEDING_PLAN_SERVICE ack from %s...: code=%s plans=%s", serial[:6], code, json.dumps(plans))
+        if code == 0:
+            _plan_ack_received(serial, plans)
         _mark_online(serial)
         asyncio.ensure_future(_check_and_fire_alerts(serial))
         return
@@ -1691,6 +1995,10 @@ async def _respond_feeding_plan(serial: str, request_topic: str) -> None:
     # Respond with GET_FEEDING_PLAN_EVENT + stored plans. Empty list is fine — feeder
     # will report code 2099 but runs its stored schedule autonomously.
     import storage as _storage
+    try:
+        prepare_plans_for_feeder(serial)
+    except Exception:
+        _LOGGER.exception("Plan timezone reconcile before plan response failed for %s...", serial[:6])
     stored_plans = _storage.get_active_feeding_plans(serial)
     clean_plans = _wire_plans(stored_plans)
     payload = json.dumps({
@@ -2496,6 +2804,10 @@ async def _offline_watchdog():
     import time as _t
     while True:
         await asyncio.sleep(60)
+        try:
+            await reconcile_plan_timezones()   # storage part also runs while MQTT is down
+        except Exception:
+            _LOGGER.exception("Plan timezone reconcile error")
         if _client_ref is None:
             continue  # already fully offline; _mqtt_loop handles marking
         now = _t.time()

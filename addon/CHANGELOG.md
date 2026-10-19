@@ -2,6 +2,9 @@
 
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
+## Unreleased
+- Feeding schedules now stay on local time across daylight saving changes. Plan times are UTC on the wire (a One RFID fires them at their UTC time) and the schedule was only converted when it was saved, so after a clock change a 07:00 meal could move to 06:00 or 08:00. The add-on now shifts the plans when the UTC offset of the Settings timezone changes, re-sends them until the feeder confirms, and guards against feeding a meal twice in the repeated hour or when the feeder gets the change late. An editor tab opened before the change cannot save over it. Needs Feeder Timezone set in Settings. If you upgrade after a clock change, check your meal times once. Details: [docs/feeding-plan-dst.md](../docs/feeding-plan-dst.md)
+
 ## 2026.10.5
 - Polar Wet Feeder: the door open time and its unit (seconds or minutes) were never actually saved, so they were blank again after reopening the device, and every serve still sent the test value of 1 (issue #13). They now save and are used for each serve. The same bug kept the app from remembering the model a feeder uses in its messages, which only mattered for feeders it could not already work out from the serial
 - Granary feeders (PLAF103, and the PLAF203 camera feeder) now offer up to 12 portions for Feed Now and schedules, up from 5 (issue #14). Handy for the dual-bowl feeder, which splits each meal between its two bowls. The One RFID feeder stays at 5

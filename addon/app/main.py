@@ -914,7 +914,12 @@ async def handle_api_pet_image_upload(request):
 
 async def handle_api_feeding_plans_get(request):
     serial = request.match_info["serial"]
-    return web.json_response(storage.get_device_feeding_plans(serial))
+    try:
+        devices.prepare_plans_for_feeder(serial)   # show plans already shifted for DST
+    except Exception:
+        _LOGGER.exception("Plan timezone reconcile failed for %s...", serial[:6])
+    return web.json_response(storage.get_device_feeding_plans(serial),
+                             headers={"X-Plan-Revision": devices.plan_revision(serial)})
 
 
 async def handle_api_feeding_plans_post(request):
@@ -923,7 +928,10 @@ async def handle_api_feeding_plans_post(request):
         plans = await request.json()
         if not isinstance(plans, list):
             return web.Response(status=400, text="Expected a JSON array")
-        storage.save_device_feeding_plans(serial, plans)
+        import time
+        refused = devices.accept_plan_edit(serial, plans, request.query.get("revision"), int(time.time() * 1000))
+        if refused:
+            return web.Response(status=409, text=refused)
         ok = await devices.send_feeding_plans(serial, plans)
         asyncio.ensure_future(devices.republish_ha_discovery(serial))
         asyncio.ensure_future(devices.publish_ha_state(serial))
