@@ -1,5 +1,7 @@
 # Feeding plans and daylight saving time
 
+Contributed by [maslygan](https://github.com/maslygan) in PR #15, who also tested it on their own feeders.
+
 Feeding plan times are UTC on the wire (confirmed on a One RFID, fw 3.0.72). The
 schedule editor converts local time to UTC with the offset of the moment you save,
 so without help every meal would move by an hour at each DST change.
