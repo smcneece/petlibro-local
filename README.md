@@ -36,7 +36,7 @@ By installing and using Petlibro Local you acknowledge that:
 - It is still maturing software. Features may break, change, or disappear without notice.
 - You are responsible for maintaining an adequate care routine for your pets independent of any automation software.
 
-If you are not comfortable with these terms, do not use this software.
+If you are not comfortable with these terms, do not use this software!
 
 ---
 
