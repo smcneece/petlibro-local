@@ -105,12 +105,18 @@ async def _fire_notify_service(service: str, title: str, message: str, targets: 
         payload["target"] = targets
     try:
         async with aiohttp.ClientSession() as session:
-            await session.post(
+            async with session.post(
                 f"{HA_API_URL}/services/notify/{service}",
                 headers={**_headers(), "Content-Type": "application/json"},
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=10),
-            )
+            ) as resp:
+                status = resp.status
+        if status != 200:
+            # A missing or misspelled notify service is refused by Home Assistant
+            # (issue #16): say so instead of logging it as sent.
+            _LOGGER.warning("Notify service '%s' failed (HTTP %s): %s", service, status, title if not clear else "(clear)")
+            return
         _LOGGER.info("Notify service '%s' fired: %s", service, title if not clear else "(clear)")
     except Exception:
         _LOGGER.exception("Failed to fire notify service '%s'", service)

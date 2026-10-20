@@ -78,7 +78,7 @@ async function pollAutoCapture() {
       document.getElementById("a-cred-pass").value = capturedPass;
       const capturedSerial = detected.serial || s.result.client_id || "";
       const detectedVariant = detectVariantFromSerial(capturedSerial, detected.device_type || "");
-      populateVariantSelect("a-variant", detected.device_type || "", detectedVariant);
+      populateVariantSelect("a-variant", detected.device_type || "", detectedVariant, capturedSerial);
       populateRoomSelect("a-room", "");
       populatePetSection("a-pet-section", "a-pet-list", "a-pet-optional", detected.device_type || "");
       await api("POST", "/api/capture/reset");
@@ -111,7 +111,7 @@ async function finishAutoDevice() {
     name: document.getElementById("a-name").value.trim() || t("add_device.default_name"),
     room: document.getElementById("a-room").value.trim(),
     variant: aVariant,
-    image_url: deviceImageUrl(typeEl.value, aVariant),
+    image_url: deviceImageUrl(typeEl.value, aVariant, serial),
     pet_ids: selectedPetIds("a-pet-list"),
   };
   try {
@@ -164,7 +164,7 @@ async function finishManualDevice() {
     name: document.getElementById("w-name").value.trim() || t("add_device.default_name"),
     room: document.getElementById("w-room").value.trim(),
     variant: wVariant,
-    image_url: deviceImageUrl(typeEl.value, wVariant),
+    image_url: deviceImageUrl(typeEl.value, wVariant, serial),
     pet_ids: selectedPetIds("w-pet-list"),
   };
   try {

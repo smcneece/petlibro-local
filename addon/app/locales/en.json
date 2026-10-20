@@ -34,7 +34,7 @@
   "settings.units_imperial": "Imperial (fl oz)",
   "settings.tz_heading": "Feeder Timezone",
   "settings.tz_label": "Timezone",
-  "settings.tz_hint": "Daylight saving time is handled automatically. Enter schedule times in local time — the app converts to UTC for the feeder. Change takes effect after feeder reconnects.",
+  "settings.tz_hint": "Enter schedule times in local time. Saved schedules follow daylight saving changes in this timezone. Changing the timezone keeps existing UTC times, so displayed local meal times may change; check and correct them before saving.",
   "settings.language": "Language",
   "settings.save": "Save",
   "settings.saved": "✓ Saved",
@@ -155,6 +155,7 @@
   "device_modal.load_failed_log": "Failed to load log.",
   "device_modal.load_failed_intake": "Failed to load intake data.",
   "device_modal.load_failed_schedule": "Failed to load schedule.",
+  "device_modal.schedule_reload_changed": "The schedule changed since you opened it (for example a daylight saving shift), so it was reloaded. Please make your change again.",
 
   "overview.water_level": "Water Level",
   "overview.filter_due": "Filter Due",

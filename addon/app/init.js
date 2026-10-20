@@ -126,14 +126,14 @@ async function detectLanguage(availableLangs) {
     showAddView("auto"); showAutoStep(0);
   });
   document.getElementById("btn-method-manual").addEventListener("click", () => {
-    populateVariantSelect("w-variant", document.getElementById("w-device-type").value, "b");
+    populateVariantSelect("w-variant", document.getElementById("w-device-type").value, "b", document.getElementById("w-serial").value);
     showAddView("manual"); _wizardStep = 0; updateWizard();
   });
   document.getElementById("a-device-type").addEventListener("change", e => {
-    populateVariantSelect("a-variant", e.target.value, "b");
+    populateVariantSelect("a-variant", e.target.value, "b", document.getElementById("a-serial").value);
   });
   document.getElementById("w-device-type").addEventListener("change", e => {
-    populateVariantSelect("w-variant", e.target.value, "b");
+    populateVariantSelect("w-variant", e.target.value, "b", document.getElementById("w-serial").value);
   });
   document.getElementById("btn-auto-back-intro").addEventListener("click", () => showAddView("method"));
   document.getElementById("btn-auto-start").addEventListener("click", startAutoCapture);

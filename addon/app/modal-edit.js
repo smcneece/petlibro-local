@@ -4,7 +4,7 @@ function openEditDevice() {
   if (!device) return;
   document.getElementById("e-name").value = device.name || "";
   populateRoomSelect("e-room", device.room || "");
-  populateVariantSelect("e-variant", device.device_type, device.variant || "b");
+  populateVariantSelect("e-variant", device.device_type, device.variant || "b", device.serial, device.wire_model);
   document.getElementById("e-image").value = "";
   document.getElementById("e-cred-serial").value = device.serial || "";
   document.getElementById("e-cred-user").value = device.mqtt_user || "";
@@ -57,7 +57,7 @@ async function saveEditDevice() {
   const imageFile = document.getElementById("e-image").files[0];
 
   // Compute image URL from variant (built-in images)
-  let image_url = deviceImageUrl(device.device_type, variant) || device.image_url || "";
+  let image_url = deviceImageUrl(device.device_type, variant, serial, device.wire_model) || device.image_url || "";
 
   // Custom image upload takes priority
   if (imageFile) {
@@ -191,7 +191,23 @@ const DEVICE_MQTT_MODELS = {
   "dockstream_rfid":      "plwf305",
   "one_rfid":             "plaf301",
   "granary":              "plaf103",
+  "polar":                "plaf109",
 };
+// Bundled images go by serial prefix first, since one device type can cover several
+// models (a Granary Smart Camera Feeder, AF03, is handled as a Granary). The device
+// type is the fallback for a serial not listed here.
+const PREFIX_IMAGE_MODELS = {
+  "WF01": "plwf106", "WF02": "plwf305", "WF03": "plwf106", "WF04": "plwf116",
+  "AF01": "plaf103", "AF03": "plaf203", "AF05": "plaf109", "AF06": "plaf301",
+};
+// The model a device reports in its own messages (wire_model) wins when a picture for
+// it is bundled: some models may share a serial prefix (Granary 2 feeders seen with
+// AF03 serials). PLAF105, PLAF205 (Granary 2) and PLAF305 (Granary 2 X) pictures are bundled ahead of support.
+const IMAGE_MODELS = ["plaf103", "plaf105", "plaf109", "plaf203", "plaf205", "plaf301", "plaf305", "plwf106", "plwf116", "plwf305"];
+// Color choices that differ from the device type's, by picture model.
+const _DUAL_BOWL_VARIANTS = [{ value: "b", label: "Black" }, { value: "w", label: "White" },
+                             { value: "bd", label: "Black, dual bowl" }, { value: "wd", label: "White, dual bowl" }];
+const MODEL_VARIANTS = { "plaf203": _DUAL_BOWL_VARIANTS, "plaf205": _DUAL_BOWL_VARIANTS };
 const DEVICE_VARIANTS = {
   "dockstream2":          [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
   "dockstream2_cordless": [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
@@ -206,10 +222,35 @@ const DEVICE_VARIANTS = {
   "polar":                [{ value: "b", label: "Black" }, { value: "w", label: "White" }],
 };
 
-function deviceImageUrl(deviceType, variant) {
-  const model = DEVICE_MQTT_MODELS[deviceType];
+function _serialPrefix(serial) {
+  return (serial || "").slice(0, 4).toUpperCase();
+}
+
+function _imageModel(deviceType, serial, wireModel) {
+  const wire = (wireModel || "").toLowerCase();
+  if (IMAGE_MODELS.includes(wire)) return wire;
+  return PREFIX_IMAGE_MODELS[_serialPrefix(serial)] || DEVICE_MQTT_MODELS[deviceType] || "";
+}
+
+function deviceVariants(deviceType, serial, wireModel) {
+  return MODEL_VARIANTS[_imageModel(deviceType, serial, wireModel)] || DEVICE_VARIANTS[deviceType] || [];
+}
+
+function deviceImageUrl(deviceType, variant, serial, wireModel) {
+  const model = _imageModel(deviceType, serial, wireModel);
   if (!model || !variant) return "";
+  const variants = deviceVariants(deviceType, serial, wireModel);
+  if (variants.length && !variants.some(v => v.value === variant)) variant = variants[0].value;
   return `${BASE}/images/${model}_${variant}`;
+}
+
+// The image shown for a device. One of the bundled images is worked out again from
+// the serial and color each time, so devices added before an image or mapping
+// existed pick it up. An uploaded photo is kept as it is.
+function cardImageUrl(d) {
+  const url = d.image_url || "";
+  if (url && !/\/images\/pl[a-z]{2}\d{3}_[a-z]+$/.test(url)) return url;
+  return deviceImageUrl(d.device_type, d.variant || "b", d.serial, d.wire_model) || url;
 }
 
 function populatePetSection(sectionId, listId, optionalLabelId, deviceType) {
@@ -244,10 +285,10 @@ function detectVariantFromSerial(serial, deviceType) {
   return "b"; // default — user can correct in the Color dropdown
 }
 
-function populateVariantSelect(selectId, deviceType, currentVariant) {
+function populateVariantSelect(selectId, deviceType, currentVariant, serial, wireModel) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
-  const variants = DEVICE_VARIANTS[deviceType] || [];
+  const variants = deviceVariants(deviceType, serial, wireModel);
   if (!variants.length) {
     sel.closest(".form-row").style.display = "none";
     return;

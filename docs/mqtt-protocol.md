@@ -118,6 +118,8 @@ State the device reports: `currentWeight` (grams of water), `waterStopSwitch`, `
 
 **RFID fountain, newer firmware** (observed once, firmware 1.0.16): it never answers `ATTR_GET_SERVICE` and sends no `WEIGHT_CHANGE_EVENT`. Instead it sends `{"cmd":"WATER_CAP_EVENT","msgId":"..","content":[{"weightPercent":100,"weight":2384,"ts":...,"rfid":""}, ...]}` on `event/post` about every 15 seconds, with around 15 samples one second apart. `weight` is grams on the scale and `rfid` is empty unless a pet's tag is near the bowl. With the reservoir lifted off the weight reads 0 and `weightPercent` 10. A drink shows as samples carrying a tag, then a lower steady weight. It still accepts `ATTR_SET_SERVICE` (light on and off worked, with `code` 0 and an `ATTR_PUSH_EVENT`).
 
+**Dockstream 2 Cordless** (observed once, firmware 0.3.61, issue #16): it answers `ATTR_GET_SERVICE` without a weight, and sends `WATER_CAP_EVENT` about every 45 seconds with 45 samples like `{"weightPercent":70,"weight":2285,"radarDetected":false,"ts":...}`. There is no `rfid`; `radarDetected` is true while something is in front of the fountain. The radar flickers during a drink, and the weight keeps falling for 20 to 60 seconds after it goes quiet, so the app counts a drink once the radar has been quiet for 45 seconds and the weight has held still for 10. Short radar blips with no weight change happen all day. `weightPercent` stayed at 70 all day. The state message also carries `batteryState` (`CHARGED`/`CHARGING`), `lowWater`, `radarGain`, `radarSensingThreshold` and `sensingWaterDuration`.
+
 Source: `addon/app/devices.py`, search `_handle_fountain_drink` and `waterStopSwitch`.
 
 ## Polar Wet Food Feeder (PLAF109), early beta

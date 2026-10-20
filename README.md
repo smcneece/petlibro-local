@@ -47,11 +47,11 @@ If you are not comfortable with these terms, do not use this software.
 | Dockstream 2 Smart Fountain (black) | WF03...BD... | PLWF106 | Supported |
 | Dockstream 2 Smart Fountain (white) | WF03...BA... | PLWF106 | Supported |
 | Dockstream 2 Smart Fountain (white) | WF01 | PLWF106 | Supported |
-| Dockstream 2 Cordless Fountain (black) | WF04...BD... (inferred) | PLWF116 | Beta |
-| Dockstream 2 Cordless Fountain (white) | WF04...BA... (inferred) | PLWF116 | Beta |
+| Dockstream 2 Cordless Fountain | WF04 | PLWF116 | Beta |
 | Dockstream RFID Smart Fountain | WF02 | PLWF305 | Beta |
 | One RFID Smart Feeder | AF06 | PLAF301 | Supported |
 | Granary Smart Feeder | AF01 | PLAF103 | Beta |
+| Granary Smart Camera Feeder (single and dual bowl) | AF03 | PLAF203 | Beta: feeding, schedules and settings like the Granary; no camera video |
 | Polar Wet Food Feeder | AF05 (from one owner's serial) | PLAF109 | Early beta, see the [device notes](docs/devices.md#polar-wet-food-feeder-early-beta) |
 
 Notes on each model (the Granary's missing lid and RFID, the WF01 labeling, serial color codes, and the model numbers) are in [Supported device notes](docs/devices.md), along with the firmware versions I have seen. If you want to talk to a device without Home Assistant, the topics and messages are listed in [MQTT protocol notes](docs/mqtt-protocol.md).
