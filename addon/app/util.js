@@ -280,10 +280,20 @@ function _localToUtc(hhmm) {
 // Rounded, not floored: a value just saved as "N days" is always read back a
 // few milliseconds later, so flooring would show N-1 essentially every time
 // (20.99999 days floors to 20 even though nothing meaningfully elapsed).
+// Days remaining are rounded up everywhere (here and in the Home Assistant sensors),
+// so "3 days" shows exactly when a 3-day early warning starts.
+// Feeder maintenance early warnings, same numbers as device_types/feeders/maintenance.py
+// (issue #17): desiccant and housing 3 days, bowl 1 day, capped at half the interval.
+const MAINT_LEAD_DAYS = { desiccant_due: 3, housing_due: 3, bowl_due: 1 };
+function maintDueSoon(alert, daysLeft, intervalDays) {
+  if (daysLeft == null) return false;
+  return daysLeft <= Math.min(MAINT_LEAD_DAYS[alert] || 0, Math.floor(intervalDays / 2));
+}
+
 function filterDaysRemaining(d) {
   const ts = d.filterNextReplacementTimestamp;
   if (ts == null) return null;
-  return Math.max(0, Math.round((ts - Date.now()) / 86400000));
+  return Math.max(0, Math.ceil((ts - Date.now()) / 86400000));
 }
 
 function cleaningDaysRemaining(d) {
@@ -291,7 +301,7 @@ function cleaningDaysRemaining(d) {
   const interval = d.cleaning_interval_days ?? 30;
   if (ts == null) return null;
   const due = ts + interval * 86400000;
-  return Math.round((due - Date.now()) / 86400000);
+  return Math.ceil((due - Date.now()) / 86400000);
 }
 
 function desiccantDaysRemaining(d) {
@@ -299,25 +309,25 @@ function desiccantDaysRemaining(d) {
   const interval = d.desiccant_life_days ?? 14;
   if (ts == null) return null;
   const due = ts + interval * 86400000;
-  return Math.round((due - Date.now()) / 86400000);
+  return Math.ceil((due - Date.now()) / 86400000);
 }
 function foodRefillDaysRemaining(d) {
   const ts = d.last_food_refill_ts;
   const interval = d.food_refill_interval_days ?? 14;
   if (ts == null) return null;
-  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
+  return Math.ceil((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function bowlDaysRemaining(d) {
   const ts = d.last_bowl_cleaned_ts;
   const interval = d.bowl_cleaning_interval_days ?? 7;
   if (ts == null) return null;
-  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
+  return Math.ceil((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function housingDaysRemaining(d) {
   const ts = d.last_housing_cleaned_ts;
   const interval = d.housing_cleaning_interval_days ?? 30;
   if (ts == null) return null;
-  return Math.round((ts + interval * 86400000 - Date.now()) / 86400000);
+  return Math.ceil((ts + interval * 86400000 - Date.now()) / 86400000);
 }
 function _fmt12h(h, m) {
   const ampm = h >= 12 ? t("time.pm") : t("time.am");

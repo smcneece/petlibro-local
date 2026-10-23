@@ -124,12 +124,13 @@ Petlibro Local sends notifications through the channels you turn on:
 | Food tank refill due | Manual refill interval you set has elapsed (backup for the feeder's own low-food sensor, which isn't always reliable) |
 | Low water | Fountain water level drops below threshold |
 | Filter replacement due | Filter days remaining reaches 3 or fewer |
-| Cleaning overdue | Fountain or bowl cleaning interval exceeded |
+| Cleaning overdue | Fountain cleaning interval exceeded |
+| Desiccant, bowl or housing due soon | Feeder reminders: desiccant and housing 3 days before they are due, bowl 1 day before (never more than half the interval early) |
 | Food door jammed | One RFID Smart Feeder reports its door couldn't close, usually a pet blocking it |
 | Scheduled feed missed | An enabled feeding plan is more than 5 minutes past its time and nothing was dispensed (One RFID and Granary feeders) |
 | Food dispensed | Optional, off by default: every dispense, labeled Manual or Scheduled |
 
-**Pet activity notifications** fire when an RFID eating session is detected: "Zoey ate for 3m25s at Zoey's Feeder." These use the same notification channels as device alerts and can be enabled or disabled per pet.
+**Pet activity notifications** fire when an RFID eating session is detected: "Zoey ate for 3m25s at Zoey's Feeder." These use the same notification channels as device alerts and can be enabled or disabled per pet. Cats often step away and come back several times per meal, so each pet also has a "Combine visits within N minutes" setting: with it set, the visits of one meal send a single notification with the total once N minutes pass with no new visit, for example "Luna ate for 3m46s at Luna foder (5 visits over 4 min)". 0, the default, sends one per visit.
 
 **Hasn't-eaten alerts** are a separate per-pet setting: choose a number of hours, and if no eating session is detected within that window, a notification fires through the same channels. It clears itself automatically the next time that pet eats, so there's nothing to dismiss by hand. It remembers which meal it already alerted for, so restarting or rebuilding the app does not send the same alert again.
 

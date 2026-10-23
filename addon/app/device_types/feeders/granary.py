@@ -30,6 +30,8 @@ Confirmed NOT present in this device's capture, deliberately not built here:
   threshold (safe either way, since that check already requires pct > 0).
 """
 
+from . import maintenance as _maint
+
 DEVICE_TYPES = ["granary"]
 
 MQTT_MODELS = {
@@ -39,9 +41,9 @@ MQTT_MODELS = {
 ALERT_MESSAGES = {
     "food_low":        "Food hopper is empty or running low.",
     "food_refill_due":  "Food tank hasn't been refilled in a while, may be running low.",
-    "desiccant_due":    "Desiccant needs replacing.",
-    "bowl_due":         "Food bowl needs cleaning.",
-    "housing_due":      "Feeder housing needs cleaning.",
+    "desiccant_due":    "Desiccant replacement is due soon.",
+    "bowl_due":         "Food bowl cleaning is due soon.",
+    "housing_due":      "Feeder housing cleaning is due soon.",
     "battery_low":      "Backup battery is low.",
 }
 
@@ -70,27 +72,12 @@ def compute_alerts(state: dict, cfg: dict, online: bool) -> set:
             elapsed = (_time.time() - last_ts / 1000) / 86400
             if elapsed >= interval:
                 alerts.add("food_refill_due")
-    if notif.get("desiccant_due", True):
-        last_ts   = cfg.get("last_desiccant_ts")
-        life_days = cfg.get("desiccant_life_days", 14)
-        if last_ts is not None:
-            elapsed = (_time.time() - last_ts / 1000) / 86400
-            if elapsed >= life_days:
-                alerts.add("desiccant_due")
-    if notif.get("bowl_due", True):
-        last_ts   = cfg.get("last_bowl_cleaned_ts")
-        interval  = cfg.get("bowl_cleaning_interval_days", 7)
-        if last_ts is not None:
-            elapsed = (_time.time() - last_ts / 1000) / 86400
-            if elapsed >= interval:
-                alerts.add("bowl_due")
-    if notif.get("housing_due", True):
-        last_ts   = cfg.get("last_housing_cleaned_ts")
-        interval  = cfg.get("housing_cleaning_interval_days", 30)
-        if last_ts is not None:
-            elapsed = (_time.time() - last_ts / 1000) / 86400
-            if elapsed >= interval:
-                alerts.add("housing_due")
+    if notif.get("desiccant_due", True) and _maint.is_due("desiccant_due", cfg.get("last_desiccant_ts"), cfg.get("desiccant_life_days", 14)):
+        alerts.add("desiccant_due")
+    if notif.get("bowl_due", True) and _maint.is_due("bowl_due", cfg.get("last_bowl_cleaned_ts"), cfg.get("bowl_cleaning_interval_days", 7)):
+        alerts.add("bowl_due")
+    if notif.get("housing_due", True) and _maint.is_due("housing_due", cfg.get("last_housing_cleaned_ts"), cfg.get("housing_cleaning_interval_days", 30)):
+        alerts.add("housing_due")
     threshold = cfg.get("battery_low_pct", 20)
     if threshold > 0:
         pct = state.get("electricQuantity")

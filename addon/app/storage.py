@@ -70,6 +70,7 @@ ALLOWED_PET_FIELDS = {
     "notify_bell", "notify_email", "notify_mobile",
     "no_eat_alert_enabled", "no_eat_alert_hours",
     "notify_eating_activity",
+    "eating_combine_mins",
     "no_eat_alerted_for",
 }
 

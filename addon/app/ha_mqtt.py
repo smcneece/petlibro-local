@@ -10,6 +10,7 @@ Naming standard: https://developers.home-assistant.io/docs/core/entity/#entity-n
 import datetime
 import json
 import logging
+import math
 import time
 
 import polar_control
@@ -568,7 +569,8 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
 def _days_remaining_ms(epoch_ms) -> int:
     """Days remaining until a millisecond-epoch deadline (clamped to 0)."""
     remaining = (int(epoch_ms) / 1000) - time.time()
-    return max(0, int(remaining / 86400))
+    # Rounded up, like the web UI, so the count matches when early warnings start.
+    return max(0, math.ceil(remaining / 86400))
 
 
 def _next_meal_ts(plans: list) -> str | None:
@@ -693,7 +695,7 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
             life_days = cfg.get("desiccant_life_days", 14)
             last_desiccant_secs = last_desiccant / 1000  # stored as ms from JS Date.now()
             elapsed = (time.time() - last_desiccant_secs) / 86400
-            days = max(0, int(life_days - elapsed))
+            days = max(0, math.ceil(life_days - elapsed))
             await client.publish(state_topic(serial, "desiccant_days"), str(days), retain=True)
 
         if "barnDoorState" in state:
@@ -783,7 +785,7 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
             life_days = cfg.get("desiccant_life_days", 14)
             last_desiccant_secs = last_desiccant / 1000
             elapsed = (time.time() - last_desiccant_secs) / 86400
-            days = max(0, int(life_days - elapsed))
+            days = max(0, math.ceil(life_days - elapsed))
             await client.publish(state_topic(serial, "desiccant_days"), str(days), retain=True)
 
         if "volume" in state:

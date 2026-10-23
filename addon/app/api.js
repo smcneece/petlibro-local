@@ -25,8 +25,9 @@ function deviceAlerts(device) {
   const alerts = [];
   if (device.device_type === "one_rfid" || device.device_type === "granary") {
     if (notif.food_low !== false && device.online && device.surplusGrain === false) alerts.push("food_low");
-    if (notif.bowl_due !== false) { const d = bowlDaysRemaining(device); if (d != null && d <= 0) alerts.push("bowl_due"); }
-    if (notif.housing_due !== false) { const d = housingDaysRemaining(device); if (d != null && d <= 0) alerts.push("housing_due"); }
+    if (notif.desiccant_due !== false && maintDueSoon("desiccant_due", desiccantDaysRemaining(device), device.desiccant_life_days ?? 14)) alerts.push("desiccant_due");
+    if (notif.bowl_due !== false && maintDueSoon("bowl_due", bowlDaysRemaining(device), device.bowl_cleaning_interval_days ?? 7)) alerts.push("bowl_due");
+    if (notif.housing_due !== false && maintDueSoon("housing_due", housingDaysRemaining(device), device.housing_cleaning_interval_days ?? 30)) alerts.push("housing_due");
   } else if (device.device_type === "polar") {
     // nothing besides the offline check below
   } else {
@@ -80,8 +81,9 @@ const _ALERT_LABELS = {
   water_low:    "Low water",
   filter_due:   "Filter replacement due",
   cleaning_due: "Cleaning overdue",
-  bowl_due:     "Bowl cleaning due",
-  housing_due:  "Housing cleaning due",
+  bowl_due:     "Bowl cleaning due soon",
+  housing_due:  "Housing cleaning due soon",
+  desiccant_due: "Desiccant replacement due soon",
 };
 
 function alertLabel(key) {

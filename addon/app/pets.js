@@ -108,6 +108,7 @@ function openPetModal(pet) {
 
   // Notification toggles
   document.getElementById("p-notify-eating-activity").checked = pet ? (pet.notify_eating_activity ?? true) : true;
+  document.getElementById("p-eating-combine-mins").value = pet ? (pet.eating_combine_mins ?? 0) : 0;
   document.getElementById("p-notify-bell").checked   = pet ? (pet.notify_bell   ?? true)  : true;
   document.getElementById("p-notify-email").checked  = pet ? (pet.notify_email  ?? true)  : true;
   document.getElementById("p-notify-mobile").checked = pet ? (pet.notify_mobile ?? false) : false;
@@ -178,6 +179,7 @@ async function savePet() {
     weight_kg:     weight_kg != null ? parseFloat(weight_kg.toFixed(3)) : null,
     rfid_tag:      rfidVal || null,
     notify_eating_activity: document.getElementById("p-notify-eating-activity").checked,
+    eating_combine_mins: Math.max(0, Math.min(30, parseInt(document.getElementById("p-eating-combine-mins").value) || 0)),
     notify_bell:          document.getElementById("p-notify-bell").checked,
     notify_email:         document.getElementById("p-notify-email").checked,
     notify_mobile:        document.getElementById("p-notify-mobile").checked,

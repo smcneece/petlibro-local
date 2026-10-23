@@ -443,9 +443,10 @@ function buildMaintenanceTab(device) {
     const bowlDays = bowlDaysRemaining(device);
     const housDays = housingDaysRemaining(device);
     const fdCol = foodDays != null && foodDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
-    const dCol  = dDays    != null && dDays    <= 3 ? "var(--pl-danger)" : "var(--pl-accent)";
-    const bCol  = bowlDays != null && bowlDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
-    const hCol  = housDays != null && housDays <= 0 ? "var(--pl-danger)" : "var(--pl-accent)";
+    // red from the same moment the early-warning alert starts (issue #17)
+    const dCol  = maintDueSoon("desiccant_due", dDays, device.desiccant_life_days ?? 14) ? "var(--pl-danger)" : "var(--pl-accent)";
+    const bCol  = maintDueSoon("bowl_due", bowlDays, device.bowl_cleaning_interval_days ?? 7) ? "var(--pl-danger)" : "var(--pl-accent)";
+    const hCol  = maintDueSoon("housing_due", housDays, device.housing_cleaning_interval_days ?? 30) ? "var(--pl-danger)" : "var(--pl-accent)";
     return `
     <div class="tab-section-heading">${t("maint.food_tank")}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">

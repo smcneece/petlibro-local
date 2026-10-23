@@ -590,6 +590,11 @@
           <input type="checkbox" id="p-notify-eating-activity" style="width:16px;height:16px;accent-color:var(--pl-accent)">
           <span>Notify each time my pet eats</span>
         </label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:24px">
+          <span style="font-size:13px;color:var(--pl-subtext)">Combine visits within</span>
+          <input type="number" id="p-eating-combine-mins" class="form-input" min="0" max="30" value="0" style="width:70px">
+          <span style="font-size:13px;color:var(--pl-subtext)">minutes into one notification (0 = every visit)</span>
+        </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
             <input type="checkbox" id="p-no-eat-enabled" style="width:16px;height:16px;accent-color:var(--pl-accent)">

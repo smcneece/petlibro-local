@@ -1748,28 +1748,13 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                             # (notify_eating_activity) so this frequent, low-stakes
                             # ping can be turned off without also silencing the
                             # separate, rarer no-eat alert, which shares the same
-                            # notify_bell/email/mobile channel fields below.
+                            # notify_bell/email/mobile channel fields.
                             try:
                                 pet_cfg = pets.get(pet_id, {})
                                 if pet_cfg.get("notify_eating_activity", True):
-                                    import notifications as _notif
-                                    pet_name = pets.get(pet_id, {}).get("name") or "Your pet"
-                                    dev_name = cfg.get("name") or serial[:8]
-                                    mins = duration_secs // 60
-                                    secs_r = duration_secs % 60
-                                    dur_str = f"{mins}m{secs_r:02d}s" if mins else f"{secs_r}s"
-                                    msg = f"{pet_name} ate for {dur_str} at {dev_name}"
-                                    title = f"Petlibro Local: {msg}"
-                                    notify_cfg = {
-                                        "notify_bell":   pet_cfg.get("notify_bell", True),
-                                        "notify_email":  pet_cfg.get("notify_email", True),
-                                        "notify_mobile": pet_cfg.get("notify_mobile", False),
-                                    }
-                                    notif_id = f"petlibro_local_{(pet_id or serial)[:8]}_eating_{int(_time.time())}"
-                                    asyncio.ensure_future(
-                                        _notif.fire_notification(title, msg, _storage.get_settings(), notify_cfg,
-                                                                 notification_id=notif_id)
-                                    )
+                                    _queue_eating_notification(
+                                        pet_id or serial, pet_cfg,
+                                        cfg.get("name") or serial[:8], duration_secs, _time.time())
                             except Exception:
                                 _LOGGER.exception("Pet eating notification error")
                     except Exception:
@@ -2207,6 +2192,79 @@ def _format_local_time(ts_ms: int) -> str:
     else:
         dt = dt.astimezone()
     return dt.strftime("%I:%M:%S %p").lstrip("0")
+
+
+# ── Eating notifications, optionally combined (issue #18) ─────────────────
+# Cats step away and come back several times per meal, and each RFID session over
+# the minimum used to send its own push. With a pet's eating_combine_mins set, a
+# session starts or extends a per-pet timer instead, and one notification with the
+# total goes out once that many minutes pass with no new session. 0 sends every
+# session at once (the old behavior). Kept in memory only: a restart mid-meal drops
+# that meal's pending notification.
+_eating_buf: dict[str, dict] = {}
+EATING_COMBINE_MAX_MINS = 30
+
+
+def _fmt_eat_secs(secs: int) -> str:
+    mins, s = divmod(int(secs), 60)
+    return f"{mins}m{s:02d}s" if mins else f"{s}s"
+
+
+def _eating_combine_mins(pet_cfg: dict) -> int:
+    try:
+        v = int(pet_cfg.get("eating_combine_mins") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(EATING_COMBINE_MAX_MINS, v))
+
+
+def _send_eating_notification(key: str, pet_cfg: dict, msg: str) -> None:
+    import time as _time
+    import notifications as _notif
+    import storage as _storage
+    notify_cfg = {
+        "notify_bell":   pet_cfg.get("notify_bell", True),
+        "notify_email":  pet_cfg.get("notify_email", True),
+        "notify_mobile": pet_cfg.get("notify_mobile", False),
+    }
+    notif_id = f"petlibro_local_{key[:8]}_eating_{int(_time.time())}"
+    asyncio.ensure_future(_notif.fire_notification(f"Petlibro Local: {msg}", msg, _storage.get_settings(),
+                                                   notify_cfg, notification_id=notif_id))
+
+
+def _queue_eating_notification(key: str, pet_cfg: dict, dev_name: str, duration_secs: int, now: float) -> None:
+    """key is the pet id (or the serial when no pet is linked)."""
+    pet_name = pet_cfg.get("name") or "Your pet"
+    mins = _eating_combine_mins(pet_cfg)
+    if not mins:
+        _send_eating_notification(key, pet_cfg, f"{pet_name} ate for {_fmt_eat_secs(duration_secs)} at {dev_name}")
+        return
+    buf = _eating_buf.get(key)
+    if buf is None:
+        buf = _eating_buf[key] = {"secs": 0, "visits": 0, "start": now - duration_secs, "handle": None}
+    elif buf["handle"] is not None:
+        buf["handle"].cancel()
+    buf["secs"] += duration_secs
+    buf["visits"] += 1
+    buf["end"] = now
+    buf["dev_name"] = dev_name
+    buf["pet_cfg"] = pet_cfg
+    buf["handle"] = asyncio.get_event_loop().call_later(mins * 60, _flush_eating_notification, key)
+
+
+def _flush_eating_notification(key: str) -> None:
+    buf = _eating_buf.pop(key, None)
+    if not buf:
+        return
+    pet_cfg = buf["pet_cfg"]
+    msg = f"{pet_cfg.get('name') or 'Your pet'} ate for {_fmt_eat_secs(buf['secs'])} at {buf['dev_name']}"
+    if buf["visits"] > 1:
+        span = max(1, round((buf["end"] - buf["start"]) / 60))
+        msg += f" ({buf['visits']} visits over {span} min)"
+    try:
+        _send_eating_notification(key, pet_cfg, msg)
+    except Exception:
+        _LOGGER.exception("Pet eating notification error")
 
 
 def _handle_water_cap(serial: str, data: dict) -> None:
