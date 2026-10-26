@@ -24,7 +24,8 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 
 | Entity | Type | Description |
 |--------|------|-------------|
-| Feed Now | Button | Dispenses one portion immediately |
+| Feed Now | Button | Dispenses the number of portions set in Feed Now Portions (1 unless changed) |
+| Feed Now Portions | Number | How many portions Feed Now dispenses: 1 to 12 on the Granary, 1 to 5 on the One RFID. Set it from a dashboard or an automation (`number.set_value`) before pressing Feed Now |
 | Open Door | Button | Opens the feeder lid on demand |
 | Volume | Number (slider) | Speaker volume 0-100 |
 | LED Display | Switch | Turns the feeder's LED screen on or off, like the Show display switch in the app. It is the setting; with a custom LED Display hours window the screen can still be dark outside that window while this is on |
@@ -51,7 +52,8 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 
 | Entity | Type | Description |
 |--------|------|-------------|
-| Feed Now | Button | Dispenses one portion immediately |
+| Feed Now | Button | Dispenses the number of portions set in Feed Now Portions (1 unless changed) |
+| Feed Now Portions | Number | How many portions Feed Now dispenses: 1 to 12 on the Granary, 1 to 5 on the One RFID. Set it from a dashboard or an automation (`number.set_value`) before pressing Feed Now |
 | Volume | Number (slider) | Speaker volume 0-100 |
 | Light | Switch | The feeder's indicator light |
 | Buttons Lock | Switch (config) | Locks the feeder's physical buttons |

@@ -137,6 +137,24 @@ def _base(serial: str, cfg: dict, state: dict) -> dict:
     }
 
 
+# Most portions one Feed Now may ask for, by device type (the web UI uses the same:
+# Granary 12, issue #14; One RFID 5 for its small bowl).
+MAX_FEED_PORTIONS = {"granary": 12, "one_rfid": 5}
+
+
+def max_feed_portions(device_type: str) -> int:
+    return MAX_FEED_PORTIONS.get(device_type, 5)
+
+
+def feed_portions(cfg: dict) -> int:
+    """The Feed Now portions saved for a device, clamped to its limit (default 1)."""
+    try:
+        n = int(cfg.get("ha_feed_portions") or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(max_feed_portions(cfg.get("device_type", "")), n))
+
+
 def _e(serial: str, key: str, b: dict, extra: dict) -> dict:
     """Merge base with stable unique_id + object_id and entity-specific fields."""
     return {**b, "unique_id": _oid(serial, key), "object_id": _obj_id(serial, key), **extra}
@@ -303,6 +321,19 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "icon":           "mdi:food-drumstick",
         })))
 
+        # How many portions Home Assistant's Feed Now dispenses (issue #19), so a
+        # dashboard or automation can feed more than one. Same limits as the app.
+        entities.append(("number", "feed_portions", _e(serial, "feed_portions", b, {
+            "name":          "Feed Now Portions",
+            "state_topic":   state_topic(serial, "feed_portions"),
+            "command_topic": cmd_topic(serial, "feed_portions"),
+            "min":           1,
+            "max":           max_feed_portions(device_type),
+            "step":          1,
+            "mode":          "box",
+            "icon":          "mdi:numeric",
+        })))
+
         entities.append(("button", "open_door", _e(serial, "open_door", b, {
             "name":          "Open Door",
             "command_topic": cmd_topic(serial, "open_door"),
@@ -467,6 +498,19 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "icon":           "mdi:food-drumstick",
         })))
 
+        # How many portions Home Assistant's Feed Now dispenses (issue #19), so a
+        # dashboard or automation can feed more than one. Same limits as the app.
+        entities.append(("number", "feed_portions", _e(serial, "feed_portions", b, {
+            "name":          "Feed Now Portions",
+            "state_topic":   state_topic(serial, "feed_portions"),
+            "command_topic": cmd_topic(serial, "feed_portions"),
+            "min":           1,
+            "max":           max_feed_portions(device_type),
+            "step":          1,
+            "mode":          "box",
+            "icon":          "mdi:numeric",
+        })))
+
         entities.append(("switch", "light", _e(serial, "light", b, {
             "name":          "Light",
             "state_topic":   state_topic(serial, "light"),
@@ -548,6 +592,7 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
         topics.append(cmd_topic(serial, "light"))
     elif device_type == "one_rfid":
         topics.append(cmd_topic(serial, "feed_now"))
+        topics.append(cmd_topic(serial, "feed_portions"))
         topics.append(cmd_topic(serial, "open_door"))
         topics.append(cmd_topic(serial, "volume"))
         topics.append(cmd_topic(serial, "display_text"))
@@ -560,6 +605,7 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
             topics.append(cmd_topic(serial, key))
     elif device_type == "granary":
         topics.append(cmd_topic(serial, "feed_now"))
+        topics.append(cmd_topic(serial, "feed_portions"))
         topics.append(cmd_topic(serial, "volume"))
         topics.append(cmd_topic(serial, "light"))
         topics.append(cmd_topic(serial, "buttons_lock"))
@@ -704,6 +750,7 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if "volume" in state:
             await client.publish(state_topic(serial, "volume"), str(state["volume"]), retain=True)
+        await client.publish(state_topic(serial, "feed_portions"), str(feed_portions(cfg)), retain=True)
 
         display_text = cfg.get("display_text", "")
         await client.publish(state_topic(serial, "display_text"), display_text[:20], retain=True)
@@ -790,6 +837,7 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if "volume" in state:
             await client.publish(state_topic(serial, "volume"), str(state["volume"]), retain=True)
+        await client.publish(state_topic(serial, "feed_portions"), str(feed_portions(cfg)), retain=True)
 
         # lightSwitch/disableHardwareButton are real booleans on this device
         # (not the 1/0 ints the fountain uses) -- `state["lightSwitch"] == 1`
@@ -856,6 +904,12 @@ def parse_command(topic: str, payload: str, device_type: str = "") -> dict | Non
         return {"_granary_field": "disableHardwareButton", "_granary_value": payload == "ON"}
     if key == "feed_now":
         return {"_feed_now": True}
+    if key == "feed_portions":
+        try:
+            n = float(payload)
+        except (ValueError, TypeError):
+            return None
+        return {"_set_feed_portions": int(n)} if n == int(n) else None
     if key == "open_door":
         return {"_open_door": True}
     if key == "volume":

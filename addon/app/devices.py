@@ -1407,8 +1407,11 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
             _LOGGER.warning("HA Polar command refused for %s...: %s", serial[:6], exc)
         return
     if cmd.get("_feed_now"):
-        ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": 1})
-        _LOGGER.info("HA Feed Now %s...: %s", serial[:6], "ok" if ok else "failed")
+        portions = _feed_now_portions(serial)
+        ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": portions})
+        _LOGGER.info("HA Feed Now %s... (%d portion%s): %s", serial[:6], portions, "" if portions == 1 else "s", "ok" if ok else "failed")
+    elif "_set_feed_portions" in cmd:
+        _set_feed_portions(serial, cmd["_set_feed_portions"])
     elif cmd.get("_open_door"):
         ok = await send_command(serial, {"cmd": "SWITCH_DOOR_SERVICE", "barnDoorState": True})
         _LOGGER.info("HA Open Door %s...: %s", serial[:6], "ok" if ok else "failed")
@@ -1465,14 +1468,34 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
 
 
+def _feed_now_portions(serial: str) -> int:
+    import storage as _storage
+    return ha_mqtt.feed_portions(_storage.get_devices().get(serial, {}))
+
+
+def _set_feed_portions(serial: str, n) -> None:
+    """Saves how many portions Home Assistant's Feed Now dispenses (issue #19)."""
+    import storage as _storage
+    cfg = _storage.get_devices().get(serial, {})
+    if isinstance(n, bool) or not isinstance(n, int):
+        return
+    n = max(1, min(ha_mqtt.max_feed_portions(cfg.get("device_type", "")), n))
+    _storage.save_device(serial, {"ha_feed_portions": n})
+    _LOGGER.info("Feed Now portions for %s... set to %d", serial[:6], n)
+    asyncio.ensure_future(_publish_ha_state(serial))
+
+
 async def handle_ha_command(serial: str, cmd: dict):
     """Public entry-point for API-driven commands (already-parsed dict). Returns a
     dict of extra details for the Polar feeder, otherwise nothing."""
     if _devices.get(serial, (None, ""))[1] == "polar":
         return await _run_polar_command(serial, cmd)
     if cmd.get("_feed_now"):
-        ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": 1})
-        _LOGGER.info("API Feed Now %s...: %s", serial[:6], "ok" if ok else "failed")
+        portions = _feed_now_portions(serial)
+        ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": portions})
+        _LOGGER.info("API Feed Now %s... (%d portion%s): %s", serial[:6], portions, "" if portions == 1 else "s", "ok" if ok else "failed")
+    elif "_set_feed_portions" in cmd:
+        _set_feed_portions(serial, cmd["_set_feed_portions"])
     elif cmd.get("_open_door"):
         ok = await send_command(serial, {"cmd": "SWITCH_DOOR_SERVICE", "barnDoorState": True})
         _LOGGER.info("API Open Door %s...: %s", serial[:6], "ok" if ok else "failed")

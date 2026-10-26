@@ -62,6 +62,7 @@ ALLOWED_DEVICE_FIELDS = {
     "sound_hours_mode", "sound_start_local", "sound_end_local",
     "display_hours_mode", "display_start_local", "display_end_local",
     "polar_duration_unit", "polar_serve_duration",
+    "ha_feed_portions",
     "wire_model",
 }
 

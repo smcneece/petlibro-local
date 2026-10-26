@@ -2,6 +2,9 @@
 
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
+## 2026.10.8
+- New Home Assistant entity for Granary and One RFID feeders: Feed Now Portions (issue #19, suggested by TrpleD). Home Assistant's Feed Now button always dispensed one portion; it now dispenses the number set here, 1 to 12 on the Granary and 1 to 5 on the One RFID (the same limits as the app). An automation can set it with `number.set_value` and then press Feed Now
+
 ## 2026.10.7
 - Eating notifications can be combined (issue #18, suggested by maslygan). Cats step away and come back several times per meal, and each visit sent its own push, so one meal could mean five notifications. Each pet now has a "Combine visits within N minutes" setting in its profile: the visits of one meal then send one notification with the total time once N minutes pass with no new visit, for example "Luna ate for 3m46s at Luna foder (5 visits over 4 min)". 0, the default, keeps one notification per visit
 - Feeder maintenance reminders now warn ahead of time, like the fountain filter does (issue #17, suggested by spocoeric). Desiccant and housing cleaning alert 3 days before they are due and bowl cleaning 1 day before, so there is time to get a new desiccant pack. The warning never comes earlier than half the interval, so short custom intervals still make sense. The in-app bell now shows the same reminders (it had no desiccant reminder at all), and the maintenance tab turns red at the same moment
