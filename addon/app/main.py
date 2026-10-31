@@ -1,6 +1,7 @@
 """Petlibro Local -- aiohttp web server and main orchestrator."""
 
 import asyncio
+import hmac
 import ipaddress
 import json
 import logging
@@ -24,6 +25,15 @@ _LOGGER = logging.getLogger(__name__)
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 VERSION = "2026.10.8"
+
+# Deployment mode. As a Home Assistant add-on the Supervisor injects SUPERVISOR_TOKEN
+# and ingress fronts the UI; standalone there is neither, so /api/* (which exposes MQTT
+# broker credentials) is gated behind a shared AUTH_TOKEN instead. Note: this reads the
+# raw Supervisor env var, NOT ha_config.SUPERVISOR_TOKEN, which also accepts a standalone
+# HA_TOKEN and so must not be used to detect add-on mode.
+_IS_ADDON = bool(os.environ.get("SUPERVISOR_TOKEN"))
+_AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
+_AUTH_COOKIE = "pl_auth"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -590,8 +600,28 @@ async def handle_api_pet_delete(request):
     return web.json_response({"status": "ok"})
 
 
+async def handle_api_login(request):
+    """Standalone auth: exchange the shared AUTH_TOKEN for a session cookie."""
+    if not _AUTH_TOKEN:
+        return web.Response(status=404, text="Auth not configured")
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(status=400, text="Bad request")
+    token = (data.get("token") or "").strip()
+    if token and hmac.compare_digest(token, _AUTH_TOKEN):
+        resp = web.json_response({"ok": True})
+        resp.set_cookie(_AUTH_COOKIE, _AUTH_TOKEN, httponly=True,
+                        samesite="Lax", max_age=60 * 60 * 24 * 365)
+        return resp
+    return web.Response(status=401, text="Invalid token")
+
+
 async def handle_api_settings_get(request):
-    return web.json_response(storage.get_settings())
+    return web.json_response({
+        **storage.get_settings(),
+        "env_managed": storage.env_managed_settings(),
+    })
 
 
 async def handle_api_settings_post(request):
@@ -637,15 +667,21 @@ async def handle_api_capture_start(request):
         mosquitto_was_stopped = False
         try:
             devices.suppress_alerts(True)
-            _LOGGER.info("Stopping Mosquitto for credential capture")
-            stopped = await mosquitto.stop_mosquitto()
-            if not stopped:
-                _LOGGER.error("Failed to stop Mosquitto — capture aborted")
-                _capture_state = {"status": "error", "result": {}, "detail": "Could not stop Mosquitto. Check hassio_role: manager is set in config.yaml and rebuild the add-on."}
-                return
-            mosquitto_was_stopped = True
-            # Give Mosquitto a moment to release port 1883 before the mini broker tries to bind
-            await asyncio.sleep(3)
+            # As an add-on we can free port 1883 ourselves by stopping the Mosquitto
+            # add-on via the Supervisor. Standalone there is no Supervisor, so the user
+            # must free 1883 (stop their own broker) for the capture window.
+            if _IS_ADDON:
+                _LOGGER.info("Stopping Mosquitto for credential capture")
+                stopped = await mosquitto.stop_mosquitto()
+                if not stopped:
+                    _LOGGER.error("Failed to stop Mosquitto — capture aborted")
+                    _capture_state = {"status": "error", "result": {}, "detail": "Could not stop Mosquitto. Check hassio_role: manager is set in config.yaml and rebuild the add-on."}
+                    return
+                mosquitto_was_stopped = True
+                # Give Mosquitto a moment to release port 1883 before the mini broker tries to bind
+                await asyncio.sleep(3)
+            else:
+                _LOGGER.info("Running standalone — free port 1883 (stop your MQTT broker) for capture")
 
             known_serials = frozenset(storage.get_devices().keys())
             creds = await mqtt_broker.capture_credentials(timeout_seconds=60, known_serials=known_serials)
@@ -1036,20 +1072,37 @@ async def _restrict_api_middleware(request, handler):
     unauthenticated, by design.
     """
     if request.path.startswith("/api/"):
-        try:
-            remote_ip = ipaddress.ip_address(request.remote)
-        except (ValueError, TypeError):
-            remote_ip = None
-        if remote_ip is None or remote_ip != _INGRESS_PROXY:
-            _LOGGER.warning("Blocked /api/* request from outside the internal network: %s %s",
-                            request.remote, request.path)
-            return web.Response(status=403, text="Forbidden")
+        if _IS_ADDON:
+            # Add-on: only HA Supervisor's ingress proxy may reach /api/*.
+            try:
+                remote_ip = ipaddress.ip_address(request.remote)
+            except (ValueError, TypeError):
+                remote_ip = None
+            if remote_ip is None or remote_ip != _INGRESS_PROXY:
+                _LOGGER.warning("Blocked /api/* request from outside the internal network: %s %s",
+                                request.remote, request.path)
+                return web.Response(status=403, text="Forbidden")
+        elif request.path != "/api/login":
+            # Standalone: there is no ingress proxy, so require the shared AUTH_TOKEN
+            # (presented as a cookie set by /api/login). 401 tells the UI to prompt.
+            cookie = request.cookies.get(_AUTH_COOKIE, "")
+            if not (_AUTH_TOKEN and hmac.compare_digest(cookie, _AUTH_TOKEN)):
+                return web.Response(status=401, text="Unauthorized")
     resp = await handler(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     return resp
 
 
 def main():
+    # Standalone has no ingress/auth layer in front of /api/*, so refuse to start
+    # wide open: an AUTH_TOKEN must be set to protect the broker credentials.
+    if not _IS_ADDON and not _AUTH_TOKEN:
+        _LOGGER.error(
+            "Refusing to start: running standalone without AUTH_TOKEN. Set AUTH_TOKEN "
+            "to a secret value (see docs/standalone.md) so the web UI / API is protected."
+        )
+        raise SystemExit(1)
+
     app = web.Application(middlewares=[_restrict_api_middleware])
     app.on_startup.append(on_startup)
 
@@ -1096,6 +1149,7 @@ def main():
     app.router.add_post("/api/pets/{pet_id}/image",      handle_api_pet_image_upload)
     app.router.add_get("/api/pets/{pet_id}/log",         handle_api_pet_log)
 
+    app.router.add_post("/api/login",                    handle_api_login)
     app.router.add_get("/api/settings",                  handle_api_settings_get)
     app.router.add_post("/api/settings",                 handle_api_settings_post)
 

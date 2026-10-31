@@ -170,6 +170,12 @@ Once the repository is added:
 
 > ⚠️ **First run**: the Settings tab opens automatically if MQTT credentials are not configured. The app needs its own Mosquitto account (separate from device accounts). Create a dedicated user in the Mosquitto broker configuration, enter the credentials in the Settings tab, and tap Save Settings. A green indicator confirms the connection before you proceed to add devices.
 
+### Standalone (Docker, non-HAOS)
+
+Not running Home Assistant OS? The same image runs as a plain container — point it at
+your own MQTT broker and open the web UI directly. See **[docs/standalone.md](docs/standalone.md)**
+and **[docker-compose.example.yml](docker-compose.example.yml)**.
+
 ---
 
 ## Adding a Device
