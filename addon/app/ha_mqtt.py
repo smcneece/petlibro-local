@@ -99,8 +99,10 @@ def _oid(serial: str, key: str) -> str:
 
 def _obj_id(serial: str, key: str) -> str:
     """Stable object_id — overrides HA's user entity-ID format so IDs never change
-    even if the user renames the device or adjusts their naming preference."""
-    return f"petlibro_{serial[:8].lower()}_{key}"
+    even if the user renames the device or adjusts their naming preference. The full
+    serial: two devices of one model share the first 8 characters (two WF030103...
+    fountains got low_water and low_water_2)."""
+    return f"petlibro_{serial.lower()}_{key}"
 
 def _disc_topic(component: str, serial: str, key: str) -> str:
     return f"{_DISCOVERY_PREFIX}/{component}/{_oid(serial, key)}/config"
@@ -135,6 +137,33 @@ def _base(serial: str, cfg: dict, state: dict) -> dict:
         "payload_not_available": "offline",
         "device":                _device_block(serial, cfg, state),
     }
+
+
+FILTER_LIFE_MAX_DAYS = 365   # same limit as the Maintenance tab
+# Fountain useWaterType, the same three choices as the Overview tab
+FLOW_MODES = {0: "Continuous", 1: "Intermittent", 2: "Smart"}
+FLOW_LIMITS = {"useWaterDuration": 60, "useWaterInterval": 120}
+_HHMM = __import__("re").compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+def fountain_low_water(state: dict, cfg: dict):
+    """True below the fountain's low-water level (the same check the alert uses),
+    None when there is no reading. lowWater is the device's own threshold in grams."""
+    weight = state.get("currentWeight")
+    if not isinstance(weight, (int, float)) or isinstance(weight, bool):
+        return None
+    threshold = state.get("lowWater") or cfg.get("low_water_grams", 500)
+    return weight < threshold
+
+
+def cleaning_days_left(cfg: dict, now: float | None = None):
+    """Days until cleaning is due, rounded up (negative once overdue), or None."""
+    last = cfg.get("last_cleaned_ts")
+    if not isinstance(last, (int, float)) or isinstance(last, bool):
+        return None
+    now = time.time() if now is None else now
+    interval = cfg.get("cleaning_interval_days", 30)
+    return math.ceil((last / 1000 + interval * 86400 - now) / 86400)
 
 
 # Most portions one Feed Now may ask for, by device type (the web UI uses the same:
@@ -255,6 +284,146 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
                 "unit_of_measurement": "%",
                 "device_class":        "battery",
                 "state_class":         "measurement",
+            })))
+            # batteryState CHARGING / CHARGED (seen in a capture); DISCHARGING
+            # is the cloud integration's name for running on the battery.
+            entities.append(("binary_sensor", "charging", _e(serial, "charging", b, {
+                "name":         "Charging",
+                "state_topic":  state_topic(serial, "charging"),
+                "device_class": "battery_charging",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+            })))
+            entities.append(("binary_sensor", "on_ac_power", _e(serial, "on_ac_power", b, {
+                "name":         "On AC Power",
+                "state_topic":  state_topic(serial, "on_ac_power"),
+                "device_class": "plug",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+            })))
+            entities.append(("binary_sensor", "pet_detected", _e(serial, "pet_detected", b, {
+                "name":         "Pet Detected",
+                "state_topic":  state_topic(serial, "pet_detected"),
+                "device_class": "occupancy",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+                "icon":         "mdi:cat",
+            })))
+
+        # issue #22: the app's own maintenance and intake numbers, for automations
+        entities.append(("binary_sensor", "low_water", _e(serial, "low_water", b, {
+            "name":         "Low Water",
+            "state_topic":  state_topic(serial, "low_water"),
+            "device_class": "problem",
+            "payload_on":   "ON",
+            "payload_off":  "OFF",
+            "icon":         "mdi:water-alert",
+        })))
+        entities.append(("sensor", "intake_today", _e(serial, "intake_today", b, {
+            "name":                "Today's Water Consumption",
+            "state_topic":         state_topic(serial, "intake_today"),
+            "unit_of_measurement": "mL",
+            "device_class":        "volume",
+            "state_class":         "total",
+            "icon":                "mdi:cup-water",
+        })))
+        entities.append(("sensor", "intake_yesterday", _e(serial, "intake_yesterday", b, {
+            "name":                "Yesterday's Water Consumption",
+            "state_topic":         state_topic(serial, "intake_yesterday"),
+            "unit_of_measurement": "mL",
+            "device_class":        "volume",
+            "icon":                "mdi:cup-water",
+        })))
+        entities.append(("sensor", "cleaning_days", _e(serial, "cleaning_days", b, {
+            "name":                "Cleaning Days Remaining",
+            "state_topic":         state_topic(serial, "cleaning_days"),
+            "unit_of_measurement": "d",
+            "device_class":        "duration",
+            "state_class":         "measurement",
+            "entity_category":     "diagnostic",
+        })))
+        entities.append(("binary_sensor", "cleaning_due", _e(serial, "cleaning_due", b, {
+            "name":         "Cleaning Overdue",
+            "state_topic":  state_topic(serial, "cleaning_due"),
+            "device_class": "problem",
+            "payload_on":   "ON",
+            "payload_off":  "OFF",
+        })))
+        entities.append(("button", "mark_cleaned", _e(serial, "mark_cleaned", b, {
+            "name":          "Mark Cleaned",
+            "command_topic": cmd_topic(serial, "mark_cleaned"),
+            "payload_press": "PRESS",
+            "icon":          "mdi:spray-bottle",
+        })))
+        entities.append(("button", "reset_filter", _e(serial, "reset_filter", b, {
+            "name":          "Reset Filter",
+            "command_topic": cmd_topic(serial, "reset_filter"),
+            "payload_press": "PRESS",
+            "icon":          "mdi:air-filter",
+        })))
+        entities.append(("number", "filter_life", _e(serial, "filter_life", b, {
+            "name":                "Filter Life",
+            "state_topic":         state_topic(serial, "filter_life"),
+            "command_topic":       cmd_topic(serial, "filter_life"),
+            "min":                 1,
+            "max":                 FILTER_LIFE_MAX_DAYS,
+            "step":                1,
+            "mode":                "box",
+            "unit_of_measurement": "d",
+            "entity_category":     "config",
+            "icon":                "mdi:air-filter",
+        })))
+
+        # issue #22 phase 2: light schedule, flow mode, last drinker
+        entities.append(("switch", "light_schedule", _e(serial, "light_schedule", b, {
+            "name":          "Light Schedule",
+            "state_topic":   state_topic(serial, "light_schedule"),
+            "command_topic": cmd_topic(serial, "light_schedule"),
+            "payload_on":    "ON",
+            "payload_off":   "OFF",
+            "entity_category": "config",   # with the light times, under Configuration
+            "icon":          "mdi:lightbulb-auto",
+        })))
+        for key, name in (("light_on_time", "Light On Time"), ("light_off_time", "Light Off Time")):
+            # Home Assistant's MQTT integration has no time entity, so a text box
+            # that only takes HH:MM (24-hour, local time)
+            entities.append(("text", key, _e(serial, key, b, {
+                "name":            name,
+                "state_topic":     state_topic(serial, key),
+                "command_topic":   cmd_topic(serial, key),
+                "min":             5,
+                "max":             5,
+                "pattern":         "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                "entity_category": "config",
+                "icon":            "mdi:clock-outline",
+            })))
+        entities.append(("select", "flow_mode", _e(serial, "flow_mode", b, {
+            "name":            "Flow Mode",
+            "state_topic":     state_topic(serial, "flow_mode"),
+            "command_topic":   cmd_topic(serial, "flow_mode"),
+            "options":         list(FLOW_MODES.values()),
+            "entity_category": "config",
+            "icon":            "mdi:water-sync",
+        })))
+        for key, name, field, hi in (("flow_on_minutes", "Intermittent On Duration", "useWaterDuration", 60),
+                                     ("flow_off_minutes", "Intermittent Off Interval", "useWaterInterval", 120)):
+            entities.append(("number", key, _e(serial, key, b, {
+                "name":                name,
+                "state_topic":         state_topic(serial, key),
+                "command_topic":       cmd_topic(serial, key),
+                "min":                 1,
+                "max":                 hi,
+                "step":                1,
+                "mode":                "box",
+                "unit_of_measurement": "min",
+                "entity_category":     "config",
+                "icon":                "mdi:timer-outline",
+            })))
+        if device_type == "dockstream_rfid":
+            entities.append(("sensor", "last_drinker", _e(serial, "last_drinker", b, {
+                "name":  "Last Drink By",
+                "state_topic": state_topic(serial, "last_drinker"),
+                "icon":  "mdi:cat",
             })))
 
     # ── Feeder ────────────────────────────────────────────────────────────
@@ -551,6 +720,11 @@ async def publish_discovery(client, serial: str, cfg: dict, state: dict, extra_i
     configs = _entity_configs(serial, cfg, state, extra_icon_names=extra_icon_names)
     for component, key, config in configs:
         topic = _disc_topic(component, serial, key)
+        # Home Assistant replaced object_id with default_entity_id (domain included)
+        # and stopped honoring object_id, so entity IDs followed the device name
+        # (issue #22). Both are sent so older versions keep working. Only a newly
+        # added entity takes this ID; existing entities keep theirs.
+        config = {**config, "default_entity_id": f"{component}.{_obj_id(serial, key)}"}
         await client.publish(topic, json.dumps(config), retain=True)
     _LOGGER.info("Discovery: published %d entities for %s...", len(configs), serial[:6])
 
@@ -589,6 +763,9 @@ def get_command_topics(serial: str, device_type: str) -> list[str]:
     topics: list[str] = []
     if device_type in _FOUNTAIN_TYPES:
         topics.append(cmd_topic(serial, "pump"))
+        for key in ("mark_cleaned", "reset_filter", "filter_life", "light_schedule", "light_on_time",
+                    "light_off_time", "flow_mode", "flow_on_minutes", "flow_off_minutes"):
+            topics.append(cmd_topic(serial, key))
         topics.append(cmd_topic(serial, "light"))
     elif device_type == "one_rfid":
         topics.append(cmd_topic(serial, "feed_now"))
@@ -698,6 +875,46 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
 
         if device_type == "dockstream2_cordless" and "electricQuantity" in state:
             await client.publish(state_topic(serial, "battery"), str(state["electricQuantity"]), retain=True)
+        if device_type == "dockstream2_cordless":
+            bstate = str(state.get("batteryState") or "").upper()
+            if bstate:
+                await client.publish(state_topic(serial, "charging"), "ON" if bstate == "CHARGING" else "OFF", retain=True)
+                await client.publish(state_topic(serial, "on_ac_power"),
+                                     "ON" if bstate in ("CHARGING", "CHARGED") else "OFF", retain=True)
+            if "_radar_recent" in state:
+                await client.publish(state_topic(serial, "pet_detected"), "ON" if state["_radar_recent"] else "OFF", retain=True)
+
+        low = fountain_low_water(state, cfg)
+        if low is not None:
+            await client.publish(state_topic(serial, "low_water"), "ON" if low else "OFF", retain=True)
+        try:
+            import storage as _storage
+            hist = _storage.get_intake_history(serial, 2)
+            await client.publish(state_topic(serial, "intake_today"), str(round(hist[0]["grams"])), retain=True)
+            await client.publish(state_topic(serial, "intake_yesterday"), str(round(hist[1]["grams"])), retain=True)
+        except Exception:
+            _LOGGER.debug("Intake not published for %s...", serial[:6])
+        days = cleaning_days_left(cfg)
+        if days is not None:
+            await client.publish(state_topic(serial, "cleaning_days"), str(max(0, days)), retain=True)
+            await client.publish(state_topic(serial, "cleaning_due"), "ON" if days <= 0 else "OFF", retain=True)
+        await client.publish(state_topic(serial, "filter_life"), str(cfg.get("filter_life_days", 30)), retain=True)
+        if "lightAgingType" in state:
+            await client.publish(state_topic(serial, "light_schedule"), "ON" if state["lightAgingType"] == 2 else "OFF", retain=True)
+        # Saved times first, then what the fountain reports, then the Overview tab's
+        # own defaults, so the text box never shows "unknown" (which also fails the
+        # HH:MM check in Home Assistant's UI).
+        for key, field, wire, default in (("light_on_time", "light_start_time", "lightingStartTime", "08:00"),
+                                          ("light_off_time", "light_end_time", "lightingEndTime", "20:00")):
+            value = next((v for v in (cfg.get(field), state.get(wire)) if isinstance(v, str) and _HHMM.match(v)), default)
+            await client.publish(state_topic(serial, key), value, retain=True)
+        if state.get("useWaterType") in FLOW_MODES:
+            await client.publish(state_topic(serial, "flow_mode"), FLOW_MODES[state["useWaterType"]], retain=True)
+        for key, field in (("flow_on_minutes", "useWaterDuration"), ("flow_off_minutes", "useWaterInterval")):
+            if isinstance(state.get(field), (int, float)) and not isinstance(state.get(field), bool):
+                await client.publish(state_topic(serial, key), str(state[field]), retain=True)
+        if device_type == "dockstream_rfid" and state.get("_last_drinker"):
+            await client.publish(state_topic(serial, "last_drinker"), str(state["_last_drinker"]), retain=True)
 
         last_drink = cfg.get("last_drink_ts")
         if last_drink:
@@ -888,6 +1105,33 @@ def parse_command(topic: str, payload: str, device_type: str = "") -> dict | Non
 
     if key == "pump":
         return {"waterStopSwitch": 0 if payload == "ON" else 1}
+    if key == "mark_cleaned":
+        return {"_mark_cleaned": True}
+    if key == "light_schedule":
+        return {"_light_schedule_enabled": payload == "ON"}
+    if key in ("light_on_time", "light_off_time"):
+        text = (payload or "").strip()
+        return {"_light_time": {"which": "start" if key == "light_on_time" else "end", "value": text}} if _HHMM.match(text) else None
+    if key == "flow_mode":
+        mode = next((n for n, label in FLOW_MODES.items() if label == payload), None)
+        return None if mode is None else {"useWaterType": mode}
+    if key in ("flow_on_minutes", "flow_off_minutes"):
+        field = "useWaterDuration" if key == "flow_on_minutes" else "useWaterInterval"
+        try:
+            n = float(payload)
+        except (ValueError, TypeError):
+            return None
+        if n != int(n) or not 1 <= n <= FLOW_LIMITS[field]:
+            return None
+        return {field: int(n)}
+    if key == "reset_filter":
+        return {"_reset_filter": True}
+    if key == "filter_life":
+        try:
+            n = float(payload)
+        except (ValueError, TypeError):
+            return None
+        return {"_set_filter_life": int(n)} if n == int(n) else None
     if key == "light":
         if device_type == "one_rfid":
             return {"screenDisplaySwitch": payload == "ON"}

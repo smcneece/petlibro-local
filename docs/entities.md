@@ -87,6 +87,22 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Last Drink | Sensor (diagnostic) | Timestamp of the last detected drink |
 | Filter Days Remaining | Sensor (diagnostic) | Days until filter replacement is due |
 | Battery | Sensor | Battery percentage (Cordless model only) |
+| Charging | Binary Sensor | On while the battery is charging (Cordless model only) |
+| On AC Power | Binary Sensor | Whether the fountain is on mains power (Cordless model only) |
+| Pet Detected | Binary Sensor | On when the fountain's radar saw something in its latest report, which comes about every 45 seconds, so it lags a little (Cordless model only) |
+| Low Water | Binary Sensor | On when the water is below the fountain's low-water level, the same check as the Low water alert |
+| Today's Water Consumption | Sensor | Water drunk today in mL, as recorded by the app |
+| Yesterday's Water Consumption | Sensor | Water drunk yesterday in mL |
+| Cleaning Days Remaining | Sensor (diagnostic) | Days until cleaning is due, 0 once it is due. Empty until a cleaning is recorded |
+| Cleaning Overdue | Binary Sensor | On once cleaning is due |
+| Mark Cleaned | Button | Records a cleaning now, like Record Cleaning on the Maintenance tab |
+| Reset Filter | Button | Sets the next filter change to now plus Filter Life, like Reset Filter on the Maintenance tab |
+| Filter Life | Number (config) | How many days a filter lasts, 1 to 365 |
+| Light Schedule | Switch | Turns the light schedule on or off, like the Light Schedule toggle on the Overview tab |
+| Light On Time / Light Off Time | Text (config) | The light schedule's times, as HH:MM in 24-hour local time (Home Assistant's MQTT integration has no time entity). A change is sent once both times are set |
+| Flow Mode | Select (config) | Continuous, Intermittent or Smart, like Flow Mode on the Overview tab |
+| Intermittent On Duration / Off Interval | Number (config) | Minutes the pump runs and pauses in Intermittent mode (1 to 60 and 1 to 120) |
+| Last Drink By | Sensor | The pet whose tag was read during the last drink (Dockstream RFID Smart Fountain only) |
 
 The Dockstream RFID Smart Fountain additionally reports which pet's RFID tag was present during a drink, logged and attributed to that pet in its Recent Activity the same way the One RFID Smart Feeder attributes eating sessions.
 
@@ -99,7 +115,7 @@ Because the entities appear in HA like any other integration, they work everywhe
 - **Dashboards**: add any entity to a Lovelace card
 - **History**: all sensor values are tracked in HA's history and statistics
 
-Entity IDs are stable and based on the device serial number, so they survive device renames and room reassignments.
+Entity IDs are `petlibro_`, the device's serial in lower case and the entity, for example `sensor.petlibro_<serial>_water_level`, so they survive device renames and room reassignments. Home Assistant only uses that for entities added from 2026.11 on; entities created earlier are named after the device (for example `sensor.dining_room_fountain_water_level`) and keep that ID, so existing automations keep working. The exact IDs are on each device's page in Home Assistant.
 
 **Example: play an animation from an automation.** Use the standard `select.select_option` action on the Display Animation entity (its entity ID starts with your device's name), with the animation's name as the option:
 
