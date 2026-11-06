@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-VERSION = "2026.10.8"
+VERSION = "2026.11.1"
 
 # Deployment mode. As a Home Assistant add-on the Supervisor injects SUPERVISOR_TOKEN
 # and ingress fronts the UI; standalone there is neither, so /api/* (which exposes MQTT

@@ -44,6 +44,7 @@ class Tracker:
         self.recent = []          # recent no-tag weights, newest last
         self.latest = None        # {"weight", "percent", "ts"} of the newest sample with a weight on the scale
         self.reservoir_off = False
+        self.radar_seen = None    # radar fountains: whether the newest message saw anything
 
     def _settled(self, n=STEADY_SAMPLES):
         r = self.recent[-n:]
@@ -68,6 +69,8 @@ class Tracker:
             tag = str(tag).strip() if isinstance(tag, (str, int)) and not isinstance(tag, bool) else ""
             samples.append((ts, float(w), tag, s.get("weightPercent"), s.get("radarDetected") is True))
         samples.sort(key=lambda x: x[0])
+        if any("radarDetected" in s for s in content if isinstance(s, dict)):
+            self.radar_seen = any(r for *_, r in samples)
         for ts, w, tag, pct, radar in samples:
             if ts <= self.last_ts:
                 continue            # already seen (a repeated or overlapping message)

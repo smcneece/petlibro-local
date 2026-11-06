@@ -2,6 +2,11 @@
 
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
+## 2026.11.1
+- More fountain entities in Home Assistant (issue #22, suggested by eduardoribeiro): Low Water, Today's and Yesterday's Water Consumption, Cleaning Days Remaining, Cleaning Overdue, and Mark Cleaned, Reset Filter and Filter Life to do the Maintenance tab's jobs from a dashboard or an automation. The Dockstream 2 Cordless also gets Charging, On AC Power and Pet Detected (from its radar)
+- Also for fountains: Light Schedule (on/off), Light On Time and Light Off Time, Flow Mode, and the Intermittent on and off minutes, all settable from Home Assistant. The Dockstream RFID Smart Fountain gets Last Drink By, the pet whose tag was read during the last drink
+- New entities get IDs based on the full device serial again, so they don't change when a device is renamed. Home Assistant stopped honoring the setting Petlibro Local used for this, so entities followed the device name. Entities you already have keep their current IDs, so nothing that uses them breaks
+
 ## 2026.10.8
 - New Home Assistant entity for Granary and One RFID feeders: Feed Now Portions (issue #19, suggested by TrpleD). Home Assistant's Feed Now button always dispensed one portion; it now dispenses the number set here, 1 to 12 on the Granary and 1 to 5 on the One RFID (the same limits as the app). An automation can set it with `number.set_value` and then press Feed Now
 

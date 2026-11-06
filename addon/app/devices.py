@@ -1406,6 +1406,11 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         except _polar.PolarError as exc:
             _LOGGER.warning("HA Polar command refused for %s...: %s", serial[:6], exc)
         return
+    if "_light_schedule_enabled" in cmd:
+        await handle_ha_command(serial, cmd)
+        return
+    if await _fountain_maint_command(serial, cmd):
+        return
     if cmd.get("_feed_now"):
         portions = _feed_now_portions(serial)
         ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": portions})
@@ -1468,6 +1473,43 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
 
 
+async def _fountain_maint_command(serial: str, cmd: dict) -> bool:
+    """Home Assistant's Mark Cleaned, Reset Filter and Filter Life (issue #22), the
+    same as the Maintenance tab buttons. True when cmd was one of these."""
+    import time as _time
+    import storage as _storage
+    cfg = _storage.get_devices().get(serial, {})
+    if cmd.get("_mark_cleaned"):
+        _storage.save_device(serial, {"last_cleaned_ts": int(_time.time() * 1000)})
+        _LOGGER.info("Fountain %s... marked cleaned", serial[:6])
+    elif "_light_time" in cmd:
+        # One end of the light schedule from Home Assistant. With both ends known it
+        # is sent like the Overview tab's Apply; otherwise just remembered.
+        which, value = cmd["_light_time"].get("which"), cmd["_light_time"].get("value")
+        start = value if which == "start" else cfg.get("light_start_time")
+        end = value if which == "end" else cfg.get("light_end_time")
+        if start and end:
+            await handle_ha_command(serial, {"_light_schedule": {"start": start, "end": end}})
+        else:
+            _storage.save_device(serial, {"light_start_time" if which == "start" else "light_end_time": value})
+    elif cmd.get("_reset_filter"):
+        life = cfg.get("filter_life_days", 30)
+        await handle_ha_command(serial, {"filterNextReplacementTimestamp": int((_time.time() + life * 86400) * 1000)})
+        _LOGGER.info("Fountain %s... filter reset for %s days", serial[:6], life)
+    elif "_set_filter_life" in cmd:
+        n = cmd["_set_filter_life"]
+        if isinstance(n, bool) or not isinstance(n, int):
+            return True
+        n = max(1, min(ha_mqtt.FILTER_LIFE_MAX_DAYS, n))
+        _storage.save_device(serial, {"filter_life_days": n})
+        _LOGGER.info("Fountain %s... filter life set to %d days", serial[:6], n)
+    else:
+        return False
+    asyncio.ensure_future(_check_and_fire_alerts(serial))
+    asyncio.ensure_future(_publish_ha_state(serial))
+    return True
+
+
 def _feed_now_portions(serial: str) -> int:
     import storage as _storage
     return ha_mqtt.feed_portions(_storage.get_devices().get(serial, {}))
@@ -1490,6 +1532,8 @@ async def handle_ha_command(serial: str, cmd: dict):
     dict of extra details for the Polar feeder, otherwise nothing."""
     if _devices.get(serial, (None, ""))[1] == "polar":
         return await _run_polar_command(serial, cmd)
+    if await _fountain_maint_command(serial, cmd):
+        return
     if cmd.get("_feed_now"):
         portions = _feed_now_portions(serial)
         ok = await send_command(serial, {"cmd": "MANUAL_FEEDING_SERVICE", "grainNum": portions})
@@ -2298,6 +2342,8 @@ def _handle_water_cap(serial: str, data: dict) -> None:
     tracker = _wcap.setdefault(serial, _water_cap.Tracker())
     drinks = tracker.feed(data.get("content"))
     st = _state.setdefault(serial, {})
+    if tracker.radar_seen is not None:
+        st["_radar_recent"] = tracker.radar_seen   # cordless only: anything in front of it in this batch
     if tracker.latest:
         st["currentWeight"] = round(tracker.latest["weight"])
         if tracker.latest["percent"] is not None:
@@ -2364,6 +2410,9 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
             extra["rfid_tag"] = tag
         if pet_id:
             extra["pet_id"] = pet_id
+            # Home Assistant's "Last Drink By" (RFID fountain, issue #22)
+            _state.setdefault(serial, {})["_last_drinker"] = pets.get(pet_id, {}).get("name") or "Unnamed pet"
+            asyncio.ensure_future(_publish_ha_state(serial))
         _storage.record_intake(serial, grams)
         _storage.log_fountain_event(serial, "drink", grams=grams, extra=extra)
         _storage.save_device(serial, {"last_drink_ts": int(_time.time())})
