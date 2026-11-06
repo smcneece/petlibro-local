@@ -28,9 +28,7 @@ VERSION = "2026.11.1"
 
 # Deployment mode. As a Home Assistant add-on the Supervisor injects SUPERVISOR_TOKEN
 # and ingress fronts the UI; standalone there is neither, so /api/* (which exposes MQTT
-# broker credentials) is gated behind a shared AUTH_TOKEN instead. Note: this reads the
-# raw Supervisor env var, NOT ha_config.SUPERVISOR_TOKEN, which also accepts a standalone
-# HA_TOKEN and so must not be used to detect add-on mode.
+# broker credentials) is gated behind a shared AUTH_TOKEN instead.
 _IS_ADDON = bool(os.environ.get("SUPERVISOR_TOKEN"))
 _AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 _AUTH_COOKIE = "pl_auth"
@@ -609,7 +607,9 @@ async def handle_api_login(request):
     except Exception:
         return web.Response(status=400, text="Bad request")
     token = (data.get("token") or "").strip()
-    if token and hmac.compare_digest(token, _AUTH_TOKEN):
+    # Compare as bytes: hmac.compare_digest raises TypeError on a str with any
+    # non-ASCII character, so a stray odd character in the token would 500.
+    if token and hmac.compare_digest(token.encode("utf-8"), _AUTH_TOKEN.encode("utf-8")):
         resp = web.json_response({"ok": True})
         resp.set_cookie(_AUTH_COOKIE, _AUTH_TOKEN, httponly=True,
                         samesite="Lax", max_age=60 * 60 * 24 * 365)
@@ -1086,7 +1086,9 @@ async def _restrict_api_middleware(request, handler):
             # Standalone: there is no ingress proxy, so require the shared AUTH_TOKEN
             # (presented as a cookie set by /api/login). 401 tells the UI to prompt.
             cookie = request.cookies.get(_AUTH_COOKIE, "")
-            if not (_AUTH_TOKEN and hmac.compare_digest(cookie, _AUTH_TOKEN)):
+            # Compare as bytes (see handle_api_login): a non-ASCII cookie value
+            # would otherwise raise in hmac.compare_digest and 500 every request.
+            if not (_AUTH_TOKEN and hmac.compare_digest(cookie.encode("utf-8"), _AUTH_TOKEN.encode("utf-8"))):
                 return web.Response(status=401, text="Unauthorized")
     resp = await handler(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")

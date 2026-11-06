@@ -19,23 +19,61 @@ and those come back if you provide `HA_BASE_URL` + `HA_TOKEN`.
 
 ## Quick start
 
-1. Copy the example compose file and edit the MQTT values:
+There is no published image — you build it yourself from this repo (same as the
+Battery Sentinel Plus add-on).
+
+1. Clone the repo and copy the example compose file:
 
    ```bash
+   git clone https://github.com/smcneece/petlibro-local.git
+   cd petlibro-local
    cp docker-compose.example.yml docker-compose.yml
-   # edit MQTT_HOST / MQTT_USER / MQTT_PASS (and TZ)
-   docker compose up -d
    ```
 
-2. Open `http://<host>:8765` and add your devices.
+2. Edit `docker-compose.yml`: set a strong `AUTH_TOKEN` (see below) and your
+   `MQTT_HOST` / `MQTT_USER` / `MQTT_PASS` (and `TZ`), then build and start it:
 
-The image is published to `ghcr.io/mikefez/petlibro-local:latest` (multi-arch: amd64 +
-arm64).
+   ```bash
+   docker compose up -d --build
+   ```
+
+   Prefer plain Docker? Build and run it directly instead:
+
+   ```bash
+   docker build -t petlibro-local ./addon
+   docker run -d --name petlibro-local --restart unless-stopped \
+     -p 8765:8765 -p 1883:1883 -v "$PWD/data:/data" \
+     -e AUTH_TOKEN="$(openssl rand -hex 32)" \
+     -e MQTT_HOST=192.168.1.10 -e MQTT_USER=petlibro -e MQTT_PASS=change-me \
+     -e TZ=America/New_York \
+     petlibro-local
+   ```
+
+3. Open `http://<host>:8765`, enter your `AUTH_TOKEN` when prompted, and add your
+   devices.
+
+## Access token (`AUTH_TOKEN`, required)
+
+As an add-on, Home Assistant's ingress proxy sits in front of the UI and handles
+authentication. Standalone there is no ingress, so `/api/*` — which can return your
+MQTT broker credentials — is instead gated behind a shared **`AUTH_TOKEN`**. The app
+**refuses to start** without one, so it is never left wide open.
+
+Set it to a long random value, for example:
+
+```bash
+openssl rand -hex 32
+```
+
+`/api/login` has **no limit on attempts**, so a short or guessable token could be
+brute-forced — use a long random one. The UI prompts for the token on first use and
+stores it in a cookie.
 
 ## Configuration (environment variables)
 
 | Variable | Required | Purpose |
 |---|---|---|
+| `AUTH_TOKEN` | ✅ | Shared token protecting the web UI / `/api/*`. Use a long random value (`openssl rand -hex 32`). The app refuses to start without it. |
 | `MQTT_HOST` | ✅ | Broker host/IP the app connects to |
 | `MQTT_PORT` | | Broker port (default `1883`) |
 | `MQTT_USER` | ✅ | Broker username for this app |
@@ -65,6 +103,24 @@ during capture:
 
 During normal operation the app is just a client of `MQTT_HOST` and does not need 1883
 published.
+
+## Add each device's login to your broker (standalone)
+
+After capture, **Add Device** (and Auto Setup) save the device, but they **cannot add the
+device's MQTT login to your broker standalone**. As an add-on the app writes the login into
+the Mosquitto add-on through the Supervisor; standalone there is no Supervisor, so that step
+is skipped (it is logged, and the device is still saved).
+
+So for each device you onboard, add its captured username/password to your own MQTT broker by
+hand. For Mosquitto, for example:
+
+```bash
+mosquitto_passwd -b /path/to/passwordfile <device-username> <device-password>
+# then reload or restart your broker
+```
+
+The device's username and password are shown in the app after capture (and on the device's
+edit form). Devices of the same model share one login, so you only add it once per model.
 
 ## Home Assistant notifications (optional)
 
