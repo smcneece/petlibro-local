@@ -152,9 +152,41 @@ def _save(data: dict):
             pass
 
 
+# Settings that can be supplied from the environment (add-on options are exported
+# as these same vars by run.sh; standalone containers pass them via Docker). When a
+# var is set and non-empty it is authoritative and overrides the stored value; an
+# empty or unset var falls back to the in-app Settings UI value.
+_ENV_SETTINGS = {
+    "mqtt_host": "MQTT_HOST",
+    "mqtt_port": "MQTT_PORT",
+    "mqtt_user": "MQTT_USER",
+    "mqtt_pass": "MQTT_PASS",
+}
+
+
+def env_managed_settings() -> list:
+    """Keys currently overridden by a non-empty environment variable."""
+    return [key for key, var in _ENV_SETTINGS.items() if os.environ.get(var, "").strip()]
+
+
+def _env_overlay(settings: dict) -> dict:
+    for key, var in _ENV_SETTINGS.items():
+        val = os.environ.get(var, "").strip()
+        if not val:
+            continue
+        if key == "mqtt_port":
+            try:
+                settings[key] = int(val)
+            except ValueError:
+                _LOGGER.warning("Ignoring invalid %s=%r (not an integer)", var, val)
+            continue
+        settings[key] = val
+    return settings
+
+
 def get_settings() -> dict:
     stored = _load().get("settings", {})
-    return {**DEFAULT_SETTINGS, **stored}
+    return _env_overlay({**DEFAULT_SETTINGS, **stored})
 
 
 def save_settings(updates: dict) -> dict:

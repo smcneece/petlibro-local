@@ -17,5 +17,14 @@ homeassistant_api: true
 hassio_api: true
 hassio_role: admin
 host_network: true
+# All optional. Leave blank to configure MQTT in the web UI (unchanged behaviour);
+# set a value here and it overrides the UI for that field. ha_* are only needed for
+# HA notifications and are redundant for the add-on (the Supervisor token is used).
 options: {}
-schema: {}
+schema:
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_user: str?
+  mqtt_pass: password?
+  ha_base_url: str?
+  ha_token: password?
