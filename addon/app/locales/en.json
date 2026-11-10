@@ -55,6 +55,7 @@
   "settings.mqtt_user": "Username",
   "settings.mqtt_pass": "Password",
   "settings.mqtt_hint": "The add-on connects to this broker to receive device data. Create a dedicated broker user in Mosquitto for the add-on.",
+  "settings.mqtt_env_managed": "MQTT settings are managed by the environment / add-on options and cannot be changed here.",
   "settings.audio_tab": "Audio",
   "settings.audio_section": "Custom Feed Sounds",
   "settings.local_audio_base_url": "Local Audio Base URL",
