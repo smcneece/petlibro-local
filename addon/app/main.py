@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-VERSION = "2026.11.1"
+VERSION = "2026.11.2"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -274,6 +274,10 @@ async def handle_api_device_post(request):
         if isinstance(data.get("display_text"), str):
             data["display_text"] = data["display_text"][:20]   # same cap as the Home Assistant paths
         polar_control.validate_settings(data)
+        if "calibrated_grams_per_portion" in data and data["calibrated_grams_per_portion"] is not None:
+            g = data["calibrated_grams_per_portion"]
+            if isinstance(g, bool) or not isinstance(g, (int, float)) or not 0.1 <= g <= 200:
+                return web.Response(status=400, text="Grams per portion must be between 0.1 and 200")
         device = storage.save_device(serial, data)
         model = device.get("model", "")
         device_type = device.get("device_type", "")

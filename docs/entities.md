@@ -58,7 +58,9 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Light | Switch | The feeder's indicator light |
 | Buttons Lock | Switch (config) | Locks the feeder's physical buttons |
 | Battery | Sensor | Battery charge in percent |
+| On AC Power | Binary Sensor | Off while the feeder runs on its backup batteries (Granary Smart Feeder only, not yet the camera Granary) |
 | Last Fed | Sensor | Timestamp of the last dispense |
+| Last Feed Result | Sensor | How the last feed went: OK, Short (less came out than asked), Failed (nothing came out) or Busy (refused because the feeder was already dispensing). Attributes: portions dispensed and requested, error code, scheduled or manual, and the plan. Also on the One RFID |
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
 

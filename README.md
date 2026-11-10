@@ -290,6 +290,8 @@ Thanks to [@MechanicalCoderX](https://github.com/MechanicalCoderX) for responsib
 
 Thanks also to [@Tp-danny](https://github.com/Tp-danny) for the Granary Smart Feeder capture and for testing feed amount calibration with a real scale, and to [@avgizmo](https://github.com/avgizmo), [@jemp](https://github.com/jemp) and [@JamieSBenson](https://github.com/JamieSBenson) for the logs and reports that helped track down the delayed-feeding problem.
 
+Thanks to [@hellotomtom](https://github.com/hellotomtom) for a Granary capture and unplug tests that confirmed how it reports battery power, and for catching a Wi-Fi name the debug capture didn't hide.
+
 Thanks to Reddit user u/ski_infection for a detailed analysis of how the One RFID feeder reboots and keeps its clock, and for notes on its LED display protocol and time-sync messages, which shaped the clock handling and the LED animations.
 
 ---

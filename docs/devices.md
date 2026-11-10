@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md). The table of supported devices is there; these are the details behind it.
 
-**Granary Smart Feeder:** No RFID and no lid on this model (confirmed via a real MQTT capture, issue #8), so pet-attributed feeding and the "Open Lid"/"Food Door" features don't apply here, only the One RFID Smart Feeder has those. Has an indicator light and a "Buttons Lock" (physical button lock) the One RFID feeder doesn't.
+**Granary Smart Feeder:** No RFID and no lid on this model (confirmed via a real MQTT capture, issue #8), so pet-attributed feeding and the "Open Lid"/"Food Door" features don't apply here, only the One RFID Smart Feeder has those. Has an indicator light and a "Buttons Lock" (physical button lock) the One RFID feeder doesn't. With backup batteries fitted it reports power the same way as the One RFID (an owner's unplug tests, issue #23): `powerType` 2 while on battery, 3 on mains, and 1 when no batteries are detected.
 
 ## Polar Wet Food Feeder (early beta)
 
@@ -48,7 +48,7 @@ Thanks to the owners of the repositories above, whose published work made this p
 | One RFID Smart Feeder | 2.0.47 | 4.0.0 |
 | Dockstream 2 Smart Fountain | 0.0.34 | 1.0.0 |
 
-I have seen the cordless fountain on firmware 0.3.61 and the RFID fountain on 1.0.16. I don't have a firmware version for the Granary. If yours shows a different one (it's at the top of the device's modal), please [open an issue](https://github.com/smcneece/petlibro-local/issues) and tell me, since newer firmware may behave differently.
+I have seen the cordless fountain on firmware 0.3.61, the RFID fountain on 1.0.16 and the Granary on 1.1.15 (hardware 1.0.0). If yours shows a different one (it's at the top of the device's modal), please [open an issue](https://github.com/smcneece/petlibro-local/issues) and tell me, since newer firmware may behave differently.
 
 ## Adding a new device type
 

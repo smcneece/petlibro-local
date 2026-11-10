@@ -140,6 +140,42 @@ def _base(serial: str, cfg: dict, state: dict) -> dict:
 
 
 FILTER_LIFE_MAX_DAYS = 365   # same limit as the Maintenance tab
+# Last Feed Result states (issue #24)
+FEED_RESULTS = ("OK", "Short", "Failed", "Busy")
+FEED_BUSY_ERROR = 2002   # OBSERVED: a Feed Now sent while a dispense is running is refused with this
+
+
+def _granary_power_confirmed(serial: str, cfg: dict) -> bool:
+    from device_types.feeders import granary as _granary
+    return _granary.power_confirmed({**cfg, "serial": serial})
+
+
+def feed_result(data: dict, now: float) -> dict:
+    """Summary of a finished GRAIN_OUTPUT_EVENT (GRAIN_END) for the Last Feed Result
+    entity. Busy: refused because the feeder was already dispensing (nothing lost,
+    the running feed carries on). OK: everything asked for came out. Short: some.
+    Failed: none, for any other reason."""
+    def num(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+    actual, expected, err = num(data.get("actualGrainNum")), num(data.get("expectGrainNum")), num(data.get("errorCode"))
+    if err == FEED_BUSY_ERROR:
+        result = "Busy"
+    elif actual is not None and expected is not None and actual >= expected:
+        result = "OK"
+    elif actual:
+        result = "Short"
+    else:
+        result = "Failed"
+    kind = data.get("type")
+    return {
+        "result": result,
+        "portions_dispensed": actual,
+        "portions_requested": expected,
+        "error_code": err,
+        "source": "scheduled" if kind == 1 else "manual" if kind == 2 else None,
+        "plan_id": data.get("planId"),
+        "time": datetime.datetime.fromtimestamp(now, tz=datetime.timezone.utc).isoformat(),
+    }
 # Fountain useWaterType, the same three choices as the Overview tab
 FLOW_MODES = {0: "Continuous", 1: "Intermittent", 2: "Smart"}
 FLOW_LIMITS = {"useWaterDuration": 60, "useWaterInterval": 120}
@@ -638,6 +674,17 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "state_class":         "measurement",
         })))
 
+        # issue #23: same powerType meaning as the One RFID (2 = on battery),
+        # confirmed by an owner's unplug tests on the plain Granary only
+        if _granary_power_confirmed(serial, cfg):
+            entities.append(("binary_sensor", "on_ac_power", _e(serial, "on_ac_power", b, {
+                "name":         "On AC Power",
+                "state_topic":  state_topic(serial, "on_ac_power"),
+                "device_class": "plug",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+            })))
+
         entities.append(("sensor", "last_fed", _e(serial, "last_fed", b, {
             "name":         "Last Fed",
             "state_topic":  state_topic(serial, "last_fed"),
@@ -708,6 +755,17 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "step":          1,
             "mode":          "slider",
             "icon":          "mdi:volume-high",
+        })))
+
+    if device_type in ("one_rfid", "granary"):
+        # issue #24: how the last dispense went, from the feeder's own GRAIN_END
+        entities.append(("sensor", "last_feed_result", _e(serial, "last_feed_result", b, {
+            "name":                  "Last Feed Result",
+            "state_topic":           state_topic(serial, "last_feed_result"),
+            "json_attributes_topic": state_topic(serial, "last_feed_result_attrs"),
+            "device_class":          "enum",
+            "options":               list(FEED_RESULTS),
+            "icon":                  "mdi:food-drumstick-outline",
         })))
 
     return entities
@@ -1027,6 +1085,8 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
     elif device_type == "granary":
         if "electricQuantity" in state:
             await client.publish(state_topic(serial, "battery"), str(state["electricQuantity"]), retain=True)
+        if "powerType" in state and _granary_power_confirmed(serial, cfg):
+            await client.publish(state_topic(serial, "on_ac_power"), "OFF" if state["powerType"] == 2 else "ON", retain=True)
 
         last_fed = cfg.get("last_fed_ts")
         if last_fed:
@@ -1066,6 +1126,12 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
         if "disableHardwareButton" in state:
             val = "ON" if state["disableHardwareButton"] else "OFF"
             await client.publish(state_topic(serial, "buttons_lock"), val, retain=True)
+
+    if device_type in ("one_rfid", "granary") and isinstance(state.get("_last_feed_result"), dict):
+        r = state["_last_feed_result"]
+        await client.publish(state_topic(serial, "last_feed_result"), r.get("result", "OK"), retain=True)
+        await client.publish(state_topic(serial, "last_feed_result_attrs"),
+                             json.dumps({k: v for k, v in r.items() if k != "result"}), retain=True)
 
 
 def parse_command(topic: str, payload: str, device_type: str = "") -> dict | None:

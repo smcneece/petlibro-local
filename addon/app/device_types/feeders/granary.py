@@ -20,19 +20,25 @@ Confirmed NOT present in this device's capture, deliberately not built here:
   feed, so the Granary does report dispenses through the shared handler.
   Still not built: a Last Fed HA sensor and eating-session logging (no RFID
   or lid to key off).
-- powerType semantics are NOT assumed to match the RFID feeder's confirmed
-  2=battery/3=AC mapping. This capture only ever showed powerType: 1 (no
-  battery installed, electricQuantity: 0, matching the cloud integration's
-  "Battery/AC %: 0%" reading) -- a value never seen on the RFID feeder. Until
-  a real test confirms what this model's powerType values mean, no
-  power_battery/on_ac_power alert or sensor is built for it, just the plain
-  electricQuantity-based Battery sensor and the existing battery_low_pct
-  threshold (safe either way, since that check already requires pct > 0).
+- powerType: CONFIRMED the same as the RFID feeder (issue #23, an owner's
+  capture, fw 1.1.15): with batteries fitted, unplugging sends powerType 2 at
+  once and plugging back in 3; normal running is 3. Without batteries (the
+  first capture here) it reports 1, and once in a day with batteries it also
+  reported 1 for a single poll. Only 2 means on battery, so power_battery and
+  the On AC Power sensor key off 2 like the One RFID.
 """
 
 from . import maintenance as _maint
 
 DEVICE_TYPES = ["granary"]
+
+
+def power_confirmed(cfg: dict) -> bool:
+    """powerType is confirmed on the plain Granary (PLAF103) only. The camera
+    Granary (PLAF203, serial AF03, handled as a Granary) sent 2, then 1, then 3
+    within one boot in the only capture, so no power alert or sensor for it yet."""
+    serial = str(cfg.get("serial") or "").upper()
+    return not serial.startswith("AF03") and cfg.get("wire_model") != "PLAF203"
 
 MQTT_MODELS = {
     "granary": "PLAF103",
@@ -45,6 +51,7 @@ ALERT_MESSAGES = {
     "bowl_due":         "Food bowl cleaning is due soon.",
     "housing_due":      "Feeder housing cleaning is due soon.",
     "battery_low":      "Backup battery is low.",
+    "power_battery":    "Running on battery power (AC lost).",
 }
 
 DEFAULT_NOTIFICATIONS = {
@@ -83,6 +90,8 @@ def compute_alerts(state: dict, cfg: dict, online: bool) -> set:
         pct = state.get("electricQuantity")
         if pct is not None and pct > 0 and pct <= threshold:
             alerts.add("battery_low")
+    if notif.get("power_battery", True) and power_confirmed(cfg) and state.get("powerType") == 2:
+        alerts.add("power_battery")
     return alerts
 
 

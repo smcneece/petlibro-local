@@ -2,6 +2,12 @@
 
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
+## Unreleased
+- Granary Smart Feeder: On AC Power in Home Assistant and the "Running on battery" alert, with the power restored notification, like the One RFID (issue #23, from hellotomtom's unplug tests and capture). Not yet for the camera Granary, whose power readings haven't been confirmed
+- New Home Assistant sensor for the Granary and One RFID: Last Feed Result (issue #24, suggested by hellotomtom). OK, Short, Failed, or Busy when a Feed Now arrives while the feeder is already dispensing, with the portions dispensed and requested, the error code and whether it was scheduled or manual as attributes. The activity log's Manual or Scheduled label now comes from the feeder's own report when it gives one
+- Feed amount: you can now type a grams per portion you already measured, instead of running the calibration wizard (issue #25, suggested by hellotomtom). It's under Feed Amount Calibration on the Schedule tab
+- The debug capture now also hides the Wi-Fi name inside the feeder's Wi-Fi diagnostic messages, and device MAC addresses. Thanks to hellotomtom for catching it
+
 ## 2026.11.1
 - More fountain entities in Home Assistant (issue #22, suggested by eduardoribeiro): Low Water, Today's and Yesterday's Water Consumption, Cleaning Days Remaining, Cleaning Overdue, and Mark Cleaned, Reset Filter and Filter Life to do the Maintenance tab's jobs from a dashboard or an automation. The Dockstream 2 Cordless also gets Charging, On AC Power and Pet Detected (from its radar)
 - Also for fountains: Light Schedule (on/off), Light On Time and Light Off Time, Flow Mode, and the Intermittent on and off minutes, all settable from Home Assistant. The Dockstream RFID Smart Fountain gets Last Drink By, the pet whose tag was read during the last drink

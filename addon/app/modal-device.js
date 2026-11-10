@@ -929,6 +929,13 @@ function buildScheduleTab(plans) {
     <div style="display:flex;gap:8px">
       <button class="btn-secondary" id="btn-calibrate-feed" style="flex:1">${t("maint.calibrate_feed")}</button>
       ${_currentDevice.calibrated_grams_per_portion ? `<button class="btn-secondary" id="btn-reset-feed-calibration" style="flex-shrink:0;color:var(--pl-danger)">${t("maint.reset_calibration")}</button>` : ""}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--pl-subtext)">${t("maint.grams_direct")}</span>
+      <input class="form-input" id="feed-grams-direct" type="number" min="0.1" max="${CAL_MAX_GRAMS}" step="0.1"
+        value="${_currentDevice.calibrated_grams_per_portion ?? ""}" placeholder="10" style="width:90px">
+      <span style="font-size:13px;color:var(--pl-subtext)">g</span>
+      <button class="btn-secondary" id="btn-feed-grams-save" style="flex-shrink:0">${t("maint.grams_save")}</button>
     </div>` : "";
 
   const _paused = !!_currentDevice?.schedules_paused;
@@ -946,6 +953,9 @@ function buildScheduleTab(plans) {
     <p style="font-size:11px;color:var(--pl-subtext);margin-top:4px">${t("schedule.sync_note")}</p>
     ${calSection}`;
 }
+
+// Highest grams per portion accepted (wizard or typed); the server checks the same
+const CAL_MAX_GRAMS = 200;
 
 // In-memory plans for schedule tab editing
 let _schedPlans = [];
@@ -1012,6 +1022,19 @@ function wireScheduleTabHandlers() {
   }
   const calibrateBtn = document.getElementById("btn-calibrate-feed");
   if (calibrateBtn) calibrateBtn.onclick = () => openFeedCalibration(_currentDevice);
+  // issue #25: type a grams-per-portion you already measured, instead of the wizard
+  const gramsSave = document.getElementById("btn-feed-grams-save");
+  if (gramsSave) {
+    gramsSave.onclick = async () => {
+      const v = Math.round(parseFloat(document.getElementById("feed-grams-direct").value) * 10) / 10;
+      if (!(v >= 0.1 && v <= CAL_MAX_GRAMS)) { showToast(t("maint.grams_invalid", { max: CAL_MAX_GRAMS }), 5000); return; }
+      try {
+        await api("POST", `/api/devices/${_currentDevice.serial}`, { calibrated_grams_per_portion: v });
+        _patchDevice(_currentDevice.serial, { calibrated_grams_per_portion: v });
+        renderDeviceTab("schedule");
+      } catch (e) { showToast(String(e.message || e).replace(/^\d+\s*/, ""), 5000); }
+    };
+  }
   const resetCalBtn = document.getElementById("btn-reset-feed-calibration");
   if (resetCalBtn) {
     resetCalBtn.onclick = async () => {
@@ -1168,13 +1191,13 @@ function buildNotificationsTab(device) {
     { key: "food_dispensed", label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",       label: t("notif.offline") },
   ] : device.device_type === "granary" ? [
-    // No door_jam (no lid on this model) and no power_battery (powerType's
-    // meaning isn't confirmed for this device yet, see granary.py)
+    // No door_jam (no lid on this model)
     { key: "food_low",        label: t("notif.food_low") },
     { key: "food_refill_due", label: t("notif.food_refill_due") },
     { key: "desiccant_due",   label: t("notif.desiccant_due") },
     { key: "bowl_due",        label: t("notif.bowl_due") },
     { key: "housing_due",     label: t("notif.housing_due") },
+    { key: "power_battery",   label: t("notif.power_battery") },
     { key: "missed_feed",     label: t("notif.missed_feed") },
     { key: "food_dispensed",  label: t("notif.food_dispensed"), defaultOn: false },
     { key: "offline",         label: t("notif.offline") },
