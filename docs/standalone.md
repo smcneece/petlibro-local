@@ -49,8 +49,13 @@ Battery Sentinel Plus add-on).
      petlibro-local
    ```
 
-3. Open `http://<host>:8765`, enter your `AUTH_TOKEN` when prompted, and add your
-   devices.
+   `-p 1883:1883` is only needed for **credential capture**, and it only binds if 1883 is
+   free on this host. If your broker already runs here, drop that flag (and capture
+   elsewhere — see [Device credential capture and port 1883](#device-credential-capture-and-port-1883)).
+
+3. Open `http://<host>:8765`, enter your `AUTH_TOKEN` when prompted, and add your devices
+   (**Auto Setup** to capture credentials, or **Manual Setup** if you already have them —
+   see the sections below).
 
 ## Access token (`AUTH_TOKEN`, required)
 
@@ -123,6 +128,26 @@ during capture:
 
 During normal operation the app is just a client of `MQTT_HOST` and does not need 1883
 published.
+
+## Broker on the same host? Capture once elsewhere, then add manually
+
+The common standalone layout — broker and Petlibro Local on the **same host** — is exactly the one
+where capture can't run, because your broker already owns 1883. You don't have to relocate your real
+instance to work around this: capture **once** on a throwaway instance, then type the credentials
+into your real instance by hand.
+
+1. On any host where 1883 is free, start a **temporary** Petlibro Local (the `docker run` above is
+   fine), point `mqtt.us.petlibro.com` at it, and run **Auto Setup** for the device. You only need
+   it to **read** the captured `mqtt_user` / `mqtt_pass` (shown after capture and on the device's
+   edit form). Then discard this instance.
+2. On your **real** instance, choose **Add Device → Manual Setup** and type in the device's serial
+   plus that `mqtt_user` / `mqtt_pass`. This path needs no capture, no free 1883, and no DNS change
+   for the add itself.
+3. Add that login to your broker (next section) — standalone, the manual add can't write it for you
+   either.
+
+Devices of the same model share one login, so once you've captured it you can add every device of
+that model with **Manual Setup** without capturing again.
 
 ## Add each device's login to your broker (standalone)
 
