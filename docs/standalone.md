@@ -89,6 +89,25 @@ that field from the Settings UI instead.
 Persist state by mounting a volume at **`/data`** (devices, pets, settings, uploaded images
 and audio all live there).
 
+## Point the device at this host
+
+Petlibro devices are hardcoded to reach the cloud broker at `mqtt.us.petlibro.com` on plain TCP
+port 1883. **Nothing works — not credential capture, not normal operation — until you redirect that
+hostname** on your local network with a DNS override (Pi-hole, AdGuard Home, or router-level DNS).
+See [networking.md](networking.md) for the exact steps; standalone, read its "your Home Assistant
+IP" as **the IP of whichever host you're pointing the device at** (you run no HA).
+
+Which host that is depends on the phase, and standalone the two can differ:
+
+- **During capture**, point `mqtt.us.petlibro.com` at the host running **Petlibro Local** — the
+  tiny capture broker runs here on 1883 (see the next section).
+- **For normal operation**, point it at the host running your **MQTT broker** (`MQTT_HOST`).
+
+If Petlibro Local and your broker are the **same host**, that's a single IP and you never change it.
+If they're on **different** hosts, flip the DNS override to the Petlibro Local host for capture, then
+back to the broker host afterward — the device dials the same hostname throughout, so only the IP it
+resolves to changes.
+
 ## Device credential capture and port 1883
 
 Onboarding a device captures its MQTT credentials by briefly running a tiny broker on
@@ -97,7 +116,8 @@ port; **standalone there is no Supervisor**, so you must make sure 1883 is free 
 during capture:
 
 - If your MQTT broker runs on a **different** host/container, just publish `1883:1883` on
-  this container (as in the example) and capture works.
+  this container (as in the example) and — with DNS pointed at this host for the capture step
+  (see above) — capture works.
 - If your broker runs on the **same host's** 1883, stop it for the capture step, or run the
   capture from a host where 1883 is free.
 
