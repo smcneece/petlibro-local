@@ -220,6 +220,42 @@ def feed_portions(cfg: dict) -> int:
     return max(1, min(max_feed_portions(cfg.get("device_type", "")), n))
 
 
+# The alert conditions the app evaluates (each device module's ALERT_MESSAGES /
+# compute_alerts), surfaced as Home Assistant problem binary_sensors so MQTT /
+# standalone users can build their own automations -- the same shape the fountain
+# already uses for low_water and cleaning_due. State is published by
+# devices._publish_alert_states from the live _compute_device_alerts() set.
+#
+# 'offline' is deliberately NOT exposed: every entity shares the device availability
+# topic, so an offline sensor would read 'unavailable' exactly when it should be ON
+# (Home Assistant already models offline by the whole device going unavailable).
+_ALERT_SENSOR_TYPES = ("one_rfid", "granary")
+_ALERT_SENSOR_META = {
+    "food_low":        ("Low Food",             "mdi:food-off-outline"),
+    "food_refill_due": ("Food Refill Due",      "mdi:silo-outline"),
+    "desiccant_due":   ("Desiccant Due",        "mdi:air-filter"),
+    "bowl_due":        ("Bowl Cleaning Due",    "mdi:bowl-outline"),
+    "housing_due":     ("Housing Cleaning Due", "mdi:spray-bottle-outline"),
+    "battery_low":     ("Backup Battery Low",   "mdi:battery-alert"),
+    "power_battery":   ("On Battery Power",     "mdi:power-plug-off"),
+    "door_jam":        ("Food Door Jammed",     "mdi:door-closed-lock"),
+}
+
+
+def alert_sensor_keys(device_type: str) -> list[str]:
+    """Alert keys exposed as HA problem binary_sensors for this device, in a stable
+    display order. Feeders only for now (fountains already expose low_water /
+    cleaning_due inline), filtered to the keys the device's module actually defines --
+    so e.g. the Granary, which has no food door, gets no door_jam sensor."""
+    if device_type not in _ALERT_SENSOR_TYPES:
+        return []
+    import device_types as _device_types
+    mod = _device_types.get(device_type)
+    if not mod:
+        return []
+    return [k for k in _ALERT_SENSOR_META if k in getattr(mod, "ALERT_MESSAGES", {})]
+
+
 def _e(serial: str, key: str, b: dict, extra: dict) -> dict:
     """Merge base with stable unique_id + object_id and entity-specific fields."""
     return {**b, "unique_id": _oid(serial, key), "object_id": _obj_id(serial, key), **extra}
@@ -758,6 +794,19 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
         })))
 
     if device_type in ("one_rfid", "granary"):
+        # Each alert condition the app can raise, as its own problem binary_sensor
+        # (mirrors the fountain's Low Water / Cleaning Overdue). State is published
+        # from the live alert set -- see alert_sensor_keys and publish_alert_states.
+        for akey in alert_sensor_keys(device_type):
+            name, icon = _ALERT_SENSOR_META[akey]
+            entities.append(("binary_sensor", akey, _e(serial, akey, b, {
+                "name":         name,
+                "state_topic":  state_topic(serial, akey),
+                "device_class": "problem",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+                "icon":         icon,
+            })))
         # issue #24: how the last dispense went, from the feeder's own GRAIN_END
         entities.append(("sensor", "last_feed_result", _e(serial, "last_feed_result", b, {
             "name":                  "Last Feed Result",
@@ -1132,6 +1181,17 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
         await client.publish(state_topic(serial, "last_feed_result"), r.get("result", "OK"), retain=True)
         await client.publish(state_topic(serial, "last_feed_result_attrs"),
                              json.dumps({k: v for k, v in r.items() if k != "result"}), retain=True)
+
+
+async def publish_alert_states(client, serial: str, cfg: dict, active_alerts):
+    """Publish ON/OFF for each alert binary_sensor from the live alert set.
+
+    active_alerts is devices._compute_device_alerts(serial). Every exposed key is
+    published explicitly, so a condition that has cleared turns its sensor OFF rather
+    than leaving a stale retained ON."""
+    for akey in alert_sensor_keys(cfg.get("device_type", "")):
+        await client.publish(state_topic(serial, akey),
+                             "ON" if akey in active_alerts else "OFF", retain=True)
 
 
 def parse_command(topic: str, payload: str, device_type: str = "") -> dict | None:

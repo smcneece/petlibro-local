@@ -1114,6 +1114,7 @@ async def republish_ha_discovery(serial: str):
         custom_icon_names = [ic["name"] for ic in _storage.get_custom_icons()]
         await ha_mqtt.publish_discovery(_client_ref, serial, cfg, state, extra_icon_names=custom_icon_names)
         await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans)
+        await _publish_alert_states(serial, cfg)
     except Exception:
         _LOGGER.exception("Failed to republish HA discovery for %s...", serial[:6])
 
@@ -1146,8 +1147,25 @@ async def _publish_ha_state(serial: str):
         plans = _storage.get_active_feeding_plans(serial)
         await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans,
                                     clock_offset=_clock_offset.get(serial))
+        await _publish_alert_states(serial, cfg)
     except Exception:
         _LOGGER.exception("Failed to publish HA state for %s...", serial[:6])
+
+
+async def _publish_alert_states(serial: str, cfg: dict | None = None):
+    """Publish the alert problem-sensor states (food_low, door_jam, ...) from the
+    live alert set. Co-located with state publishing so the sensors track the same
+    events as the rest of the device's state, and -- unlike notification firing --
+    they are not gated by alert suppression."""
+    if _client_ref is None:
+        return
+    try:
+        import storage as _storage
+        if cfg is None:
+            cfg = _storage.get_devices().get(serial, {})
+        await ha_mqtt.publish_alert_states(_client_ref, serial, cfg, _compute_device_alerts(serial))
+    except Exception:
+        _LOGGER.exception("Failed to publish alert states for %s...", serial[:6])
 
 
 # ── HA command handling ────────────────────────────────────────────────────
@@ -3119,6 +3137,7 @@ async def _mqtt_loop():
                     await ha_mqtt.publish_discovery(client, serial, cfg, state, extra_icon_names=custom_icon_names)
                     await ha_mqtt.retract_legacy_entities(client, serial, cfg)
                     await ha_mqtt.publish_state(client, serial, cfg, state, plans=plans)
+                    await _publish_alert_states(serial, cfg)
                     await ha_mqtt.publish_availability(client, serial, True)
 
                 async for message in client.messages:
