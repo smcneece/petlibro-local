@@ -39,6 +39,16 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Last Eating Duration | Sensor | Duration in seconds of the last qualifying feeder door session, RFID or manual |
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding. Goes to unknown when there is none (schedules paused, or every plan disabled or deleted) |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
+| Low Food | Binary Sensor | On when the feeder's hopper sensor reports empty or low (surplusGrain). That sensor is reportedly not always reliable, so Food Refill Due is a calendar-based backup |
+| Food Refill Due | Binary Sensor | On when the food tank has not been refilled within the refill interval. A calendar-based backup for Low Food, independent of the hopper sensor |
+| Desiccant Due | Binary Sensor | On when desiccant replacement is due (same condition as the Desiccant Days Remaining countdown reaching its lead time) |
+| Bowl Cleaning Due | Binary Sensor | On when food-bowl cleaning is due |
+| Housing Cleaning Due | Binary Sensor | On when feeder-housing cleaning is due |
+| Backup Battery Low | Binary Sensor | On when the backup battery is at or below the low-battery threshold |
+| On Battery Power | Binary Sensor | On while the feeder is running on its backup batteries (AC lost) |
+| Food Door Jammed | Binary Sensor | On when the feeder reports the food door is jammed, likely something blocking it from closing |
+
+The eight **Binary Sensors above** (`device_class: problem`) are the feeder's alert conditions, the same ones that drive the app's notifications, exposed so you can automate on them directly over MQTT without the app's Home Assistant notification routing. Each respects its app notification toggle: turning an alert off in the app's settings turns its sensor off too. They are not published while the device is offline (all of a device's entities go unavailable then, which is how offline itself shows up).
 
 **Last Fed** updates automatically when food is dispensed, and also when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
 
@@ -63,6 +73,15 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Last Feed Result | Sensor | How the last feed went: OK, Short (less came out than asked), Failed (nothing came out) or Busy (refused because the feeder was already dispensing). Attributes: portions dispensed and requested, error code, scheduled or manual, and the plan. Also on the One RFID |
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
+| Low Food | Binary Sensor | On when the feeder's hopper sensor reports empty or low (surplusGrain). That sensor is reportedly not always reliable, so Food Refill Due is a calendar-based backup |
+| Food Refill Due | Binary Sensor | On when the food tank has not been refilled within the refill interval. A calendar-based backup for Low Food, independent of the hopper sensor |
+| Desiccant Due | Binary Sensor | On when desiccant replacement is due |
+| Bowl Cleaning Due | Binary Sensor | On when food-bowl cleaning is due |
+| Housing Cleaning Due | Binary Sensor | On when feeder-housing cleaning is due |
+| Backup Battery Low | Binary Sensor | On when the backup battery is at or below the low-battery threshold |
+| On Battery Power | Binary Sensor | On while the feeder runs on its backup batteries (Granary Smart Feeder only, not yet the camera Granary, same as On AC Power) |
+
+The **Binary Sensors above** (`device_class: problem`) are the feeder's alert conditions, the same ones that drive the app's notifications, exposed so you can automate on them directly over MQTT without the app's Home Assistant notification routing. Each respects its app notification toggle: turning an alert off in the app's settings turns its sensor off too. They are not published while the device is offline (all of a device's entities go unavailable then, which is how offline itself shows up). The Granary has no food door, so it has no Food Door Jammed sensor.
 
 ## Polar Wet Food Feeder (early beta)
 

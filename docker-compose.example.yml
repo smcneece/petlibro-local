@@ -1,0 +1,39 @@
+# Standalone (non-HAOS) deployment of Petlibro Local.
+# No image is published — you build it yourself from this repo. Clone the repo, copy
+# this file to docker-compose.yml, fill in the values below, then:
+#   docker compose up -d --build
+# See docs/standalone.md for the full walkthrough.
+
+services:
+  petlibro-local:
+    build:
+      context: ./addon        # builds addon/Dockerfile from your checkout
+    image: petlibro-local     # name for the locally built image
+    container_name: petlibro-local
+    restart: unless-stopped
+    ports:
+      - "8765:8765"   # web UI
+      - "1883:1883"   # only used briefly during device credential capture (see note)
+    volumes:
+      - ./data:/data  # persists devices, pets, settings, uploaded images/audio
+    environment:
+      # ── Web UI / API access token (required) ─────────────────────────────
+      # Standalone has no HA ingress in front of the UI, so /api/* (which exposes
+      # your broker credentials) is protected by this shared token. Use a long
+      # random value, e.g. `openssl rand -hex 32` — /api/login has no attempt limit.
+      AUTH_TOKEN: "change-me-to-a-long-random-value"
+      # ── MQTT broker the feeders/fountains talk to (required) ──────────────
+      MQTT_HOST: "192.168.1.10"       # your broker's host/IP
+      MQTT_PORT: "1883"
+      MQTT_USER: "petlibro"           # a dedicated broker user for this app
+      MQTT_PASS: "change-me"
+      # ── Home Assistant (optional — only for routing feed alerts through HA) ─
+      # HA_BASE_URL: "http://homeassistant:8123/api"
+      # HA_TOKEN: "<long-lived access token>"
+      # ── Timezone for schedules/logs ───────────────────────────────────────
+      TZ: "America/New_York"
+
+# Note on port 1883: this app runs a tiny temporary broker on 1883 for the one-time
+# device credential-capture step. If your MQTT broker already runs on this same host's
+# 1883, stop it for that step, or run capture on a host where 1883 is free. During
+# normal operation the app is a client of MQTT_HOST and does not need 1883 published.

@@ -258,6 +258,17 @@ function renderSettings() {
   document.getElementById("s-mqtt-port").value = _settings.mqtt_port || 1883;
   document.getElementById("s-mqtt-user").value = _settings.mqtt_user || "";
   document.getElementById("s-mqtt-pass").value = _settings.mqtt_pass || "";
+
+  // MQTT values set via environment / add-on options are authoritative; disable
+  // those fields so a UI edit that would not stick can't mislead.
+  const envManaged = _settings.env_managed || [];
+  const mqttFieldIds = {mqtt_host: "s-mqtt-host", mqtt_port: "s-mqtt-port", mqtt_user: "s-mqtt-user", mqtt_pass: "s-mqtt-pass"};
+  for (const [key, id] of Object.entries(mqttFieldIds)) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = envManaged.includes(key);
+  }
+  const envNote = document.getElementById("mqtt-env-note");
+  if (envNote) envNote.style.display = envManaged.length ? "" : "none";
   const unitsSel = document.getElementById("s-units");
   if (unitsSel) {
     for (const opt of unitsSel.options) {
