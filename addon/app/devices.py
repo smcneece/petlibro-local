@@ -970,6 +970,8 @@ def _plan_ack_received(serial: str, acked_plans) -> None:
 
 _PROTO_FIELDS     = frozenset({"cmd", "msgId", "code", "ts"})
 _SENSITIVE_FIELDS = frozenset({"wifiSsid", "wifiPassword", "audioUrl", "cameraAuthInfo"})
+# Extra names only the debug capture redacts, matched case-insensitively at any depth
+_REDACT_EXTRA_KEYS = frozenset({"ssid", "password", "pwd", "psk", "wifipwd", "bssid", "mac"})
 
 # "Due"/level-style alerts stay true for days until the user acts on them, so
 # a fresh "new" edge can reappear after any add-on restart (_alert_sent is
@@ -2098,6 +2100,14 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
         await _client_ref.publish(response_topic, ack)
     except Exception:
         pass
+    # Last Feed Result for Home Assistant (issue #24), every finished feed
+    if data.get("finished") and _devices.get(serial, (None, None))[1] in ("one_rfid", "granary"):
+        try:
+            _state.setdefault(serial, {})["_last_feed_result"] = ha_mqtt.feed_result(data, _time.time())
+            asyncio.ensure_future(_publish_ha_state(serial))
+            asyncio.ensure_future(_persist_state_cache(serial))
+        except Exception:
+            _LOGGER.exception("Last feed result failed for %s...", serial[:6])
     # Track food dispensed on completion
     if data.get("finished") and data.get("actualGrainNum", 0) > 0:
         try:
@@ -2109,6 +2119,10 @@ async def _ack_grain_output(serial: str, event_topic: str, data: dict) -> None:
             # the marker either way, a stale one is no longer useful either.
             pending_at = _pending_manual_feed.pop(serial, None)
             source = "manual" if pending_at and (_time.time() - pending_at) <= _MANUAL_FEED_WINDOW_SECS else "scheduled"
+            # The feeder says itself when it can (OBSERVED on a Granary: type 1 for a
+            # scheduled feed, 2 for Feed Now), which beats the timing guess above.
+            if data.get("type") in (1, 2):
+                source = "scheduled" if data["type"] == 1 else "manual"
             _storage.record_intake(serial, portions)
             _storage.log_feeder_event(serial, "food_dispensed", portions=portions, extra={"source": source})
             _storage.save_device(serial, {"last_fed_ts": int(_time.time())})
@@ -3212,13 +3226,28 @@ def redact_payload(payload_str: str) -> str:
         data = json.loads(payload_str)
     except Exception:
         return payload_str
-    if not isinstance(data, dict):
+    if not isinstance(data, (dict, list)):
         return payload_str
+    # Nested too: DIAG_LOG_REPORT_EVENT carries the Wi-Fi name as "SSID" inside its
+    # "log" object, which a top-level-only check missed (reported by a user who
+    # caught it in their own capture).
+    sensitive = {k.lower() for k in _SENSITIVE_FIELDS} | _REDACT_EXTRA_KEYS
     changed = False
-    for key in _SENSITIVE_FIELDS:
-        if key in data:
-            data[key] = "[redacted]"
-            changed = True
+
+    def walk(node):
+        nonlocal changed
+        if isinstance(node, dict):
+            for key in list(node):
+                if isinstance(key, str) and key.lower() in sensitive:
+                    node[key] = "[redacted]"
+                    changed = True
+                else:
+                    walk(node[key])
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
     return json.dumps(data) if changed else payload_str
 
 
