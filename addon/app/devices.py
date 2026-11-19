@@ -436,6 +436,17 @@ def _granary_settings_bundle(serial: str, overrides: dict) -> dict:
     return bundle
 
 
+def _granary_settings_sent(serial: str, bundle: dict):
+    """After a Granary settings bundle was sent, keeps what was sent as the known
+    state and publishes it, so Home Assistant's switches (Light, Buttons Lock)
+    show the new value at once. Without this they only caught up on the next
+    ATTR_GET_SERVICE poll, up to five minutes later, and a dashboard toggle
+    looked like it did nothing. The device's next report still overwrites it."""
+    _state.setdefault(serial, {}).update({k: v for k, v in bundle.items() if k != "audioUrl"})
+    asyncio.ensure_future(_persist_state_cache(serial))
+    asyncio.ensure_future(_publish_ha_state(serial))
+
+
 async def send_display(serial: str, display_text: str, display_icon: int, scene: str = "USER_CUSTOM") -> bool:
     """Push display content to the feeder via MQTT.
 
@@ -1470,6 +1481,8 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
         ok = await send_command(serial, bundle)
         _LOGGER.info("HA Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
+        if ok:
+            _granary_settings_sent(serial, bundle)
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -1665,6 +1678,8 @@ async def handle_ha_command(serial: str, cmd: dict):
         bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
         ok = await send_command(serial, bundle)
         _LOGGER.info("API Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
+        if ok:
+            _granary_settings_sent(serial, bundle)
     else:
         ok = await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))
