@@ -7,6 +7,7 @@ For full release notes and details on each version, see the [GitHub Releases pag
 - New Home Assistant sensor for the Granary and One RFID: Last Feed Result (issue #24, suggested by hellotomtom). OK, Short, Failed, or Busy when a Feed Now arrives while the feeder is already dispensing, with the portions dispensed and requested, the error code and whether it was scheduled or manual as attributes. The activity log's Manual or Scheduled label now comes from the feeder's own report when it gives one
 - Feed amount: you can now type a grams per portion you already measured, instead of running the calibration wizard (issue #25, suggested by hellotomtom). It's under Feed Amount Calibration on the Schedule tab
 - The debug capture now also hides the Wi-Fi name inside the feeder's Wi-Fi diagnostic messages, and device MAC addresses. Thanks to hellotomtom for catching it
+- Granary Smart Feeder: Light and Buttons Lock in Home Assistant now show the new state as soon as the setting is sent. Before, the feeder changed but the switch stayed where it was until the next state poll, up to five minutes later, so a dashboard toggle looked like it did nothing
 
 ## 2026.11.1
 - More fountain entities in Home Assistant (issue #22, suggested by eduardoribeiro): Low Water, Today's and Yesterday's Water Consumption, Cleaning Days Remaining, Cleaning Overdue, and Mark Cleaned, Reset Filter and Filter Life to do the Maintenance tab's jobs from a dashboard or an automation. The Dockstream 2 Cordless also gets Charging, On AC Power and Pet Detected (from its radar)
