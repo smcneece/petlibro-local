@@ -2,9 +2,80 @@
 async function api(method, path, body) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const r = await fetch(`${BASE}${path}`, opts);
+  let r = await fetch(`${BASE}${path}`, opts);
+  // Standalone Docker (PR #21) protects /api/* with AUTH_TOKEN. A 401 means we
+  // need to sign in: ask for the token, then retry the request once.
+  if (r.status === 401 && path !== "/api/login") {
+    await promptLogin();
+    r = await fetch(`${BASE}${path}`, opts);
+  }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
+}
+
+// Shared across requests that get a 401 at the same time, so only one sign-in box shows.
+let _loginPromise = null;
+
+function promptLogin() {
+  if (_loginPromise) return _loginPromise;
+  _loginPromise = new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay active pl-confirm";
+    const box = document.createElement("div");
+    box.className = "modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const h = document.createElement("div");
+    h.className = "modal-title";
+    h.textContent = t("login.title");
+    const msg = document.createElement("div");
+    msg.className = "pl-confirm-msg";
+    msg.textContent = t("login.prompt");
+    const input = document.createElement("input");
+    input.className = "form-input";
+    input.type = "password";
+    input.autocomplete = "current-password";
+    input.style.marginTop = "8px";
+    const err = document.createElement("div");
+    err.style.cssText = "color:var(--pl-danger);font-size:12px;margin-top:6px;display:none";
+    err.textContent = t("login.invalid");
+    const row = document.createElement("div");
+    row.className = "pl-confirm-actions";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "btn-primary";
+    okBtn.textContent = t("login.button");
+    row.appendChild(okBtn);
+    box.append(h, msg, input, err, row);
+    overlay.appendChild(box);
+
+    const submit = async () => {
+      err.style.display = "none";
+      okBtn.disabled = true;
+      try {
+        const r = await fetch(`${BASE}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: input.value }),
+        });
+        if (r.ok) {
+          overlay.remove();
+          _loginPromise = null;
+          resolve();
+          return;
+        }
+      } catch {}
+      okBtn.disabled = false;
+      err.style.display = "";
+      input.select();
+    };
+    okBtn.addEventListener("click", submit);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    document.body.appendChild(overlay);
+    input.focus();
+  });
+  return _loginPromise;
 }
 
 async function loadAll() {

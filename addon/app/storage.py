@@ -152,9 +152,40 @@ def _save(data: dict):
             pass
 
 
+# Settings a standalone Docker container (PR #21) can set from environment
+# variables. A non-empty variable wins over the stored value, and the Settings
+# page shows that field read-only. The add-on doesn't set these.
+_ENV_SETTINGS = {
+    "mqtt_host": "MQTT_HOST",
+    "mqtt_port": "MQTT_PORT",
+    "mqtt_user": "MQTT_USER",
+    "mqtt_pass": "MQTT_PASS",
+}
+
+
+def env_managed_settings() -> list:
+    """Keys currently set by a non-empty environment variable."""
+    return [key for key, var in _ENV_SETTINGS.items() if os.environ.get(var, "").strip()]
+
+
+def _env_overlay(settings: dict) -> dict:
+    for key, var in _ENV_SETTINGS.items():
+        val = os.environ.get(var, "").strip()
+        if not val:
+            continue
+        if key == "mqtt_port":
+            try:
+                settings[key] = int(val)
+            except ValueError:
+                _LOGGER.warning("Ignoring invalid %s=%r (not an integer)", var, val)
+            continue
+        settings[key] = val
+    return settings
+
+
 def get_settings() -> dict:
     stored = _load().get("settings", {})
-    return {**DEFAULT_SETTINGS, **stored}
+    return _env_overlay({**DEFAULT_SETTINGS, **stored})
 
 
 def save_settings(updates: dict) -> dict:
@@ -443,6 +474,75 @@ def get_fountain_pet_intake_today(serial: str) -> dict:
     for agg in result.values():
         agg["grams"] = round(agg["grams"], 1)
     return result
+
+
+# ── Per-pet activity (pet page log + Home Assistant pet devices, issue #26) ──
+
+def pet_events(pet_id: str, data: dict | None = None) -> list:
+    """Every logged feeder and fountain event that belongs to this pet, oldest
+    first, each with "serial" and "device_name" added. The one place the
+    matching rules live, so the pet page and Home Assistant always agree:
+    - feeder entries: tagged with this pet, or with its RFID tag, or a
+      pet_eating visit on a feeder that has only this pet linked;
+    - fountain entries: RFID-confirmed drinks only (an untagged weight drop is
+      never attributed, even with one pet), then the same three rules."""
+    data = data if data is not None else _load()
+    pet = data.get("pets", {}).get(pet_id, {})
+    pet_rfid = str(pet.get("rfid_tag")) if pet.get("rfid_tag") else None
+    events = []
+    for serial, cfg in data.get("devices", {}).items():
+        pet_ids = cfg.get("pet_ids", [])
+        if pet_id not in pet_ids:
+            continue
+        sole_pet = len(pet_ids) == 1
+        name = cfg.get("name") or serial[:8]
+        for entry in data.get("_feeder_log", {}).get(serial, []):
+            entry_rfid = str(entry.get("rfid_tag")) if entry.get("rfid_tag") else None
+            if (entry.get("pet_id") == pet_id
+                    or (pet_rfid and entry_rfid == pet_rfid)
+                    or (sole_pet and entry.get("type") == "pet_eating")):
+                events.append({**entry, "serial": serial, "device_name": name})
+        if cfg.get("device_type", "").startswith("dockstream"):
+            for entry in data.get("_fountain_log", {}).get(serial, []):
+                entry_rfid = str(entry.get("rfid_tag")) if entry.get("rfid_tag") else None
+                if not entry_rfid:
+                    continue
+                if (entry.get("pet_id") == pet_id
+                        or (pet_rfid and entry_rfid == pet_rfid)
+                        or sole_pet):
+                    events.append({**entry, "serial": serial, "device_name": name})
+    events.sort(key=lambda e: e.get("ts", 0))
+    return events
+
+
+def pet_activity_summary(pet_id: str, data: dict | None = None, today: datetime.date | None = None) -> dict:
+    """Today's totals and the latest drink and meal visit for one pet, from
+    pet_events(). Today is the local day, the same boundary as the fountain
+    intake totals. Water is in mL (1 g of water = 1 mL)."""
+    today = today or datetime.date.today()
+    s = {"water_today": 0.0, "drinks_today": 0, "drinking_time_today": 0,
+         "last_drink": None, "last_drink_amount": None,
+         "eating_visits_today": 0, "eating_time_today": 0,
+         "last_eating": None, "last_eating_duration": None}
+    for e in pet_events(pet_id, data):
+        ts = e.get("ts", 0)
+        is_today = datetime.datetime.fromtimestamp(ts / 1000).date() == today
+        secs = int(e.get("duration_secs") or 0)
+        if e.get("type") == "drink":
+            s["last_drink"] = ts // 1000
+            s["last_drink_amount"] = round(e.get("grams", 0), 1)
+            if is_today:
+                s["water_today"] += e.get("grams", 0)
+                s["drinks_today"] += 1
+                s["drinking_time_today"] += secs
+        elif e.get("type") == "pet_eating":
+            s["last_eating"] = ts // 1000
+            s["last_eating_duration"] = secs
+            if is_today:
+                s["eating_visits_today"] += 1
+                s["eating_time_today"] += secs
+    s["water_today"] = round(s["water_today"], 1)
+    return s
 
 
 # ── Custom display icons ──────────────────────────────────────────────────────

@@ -1,0 +1,39 @@
+# Standalone (non-HAOS) Petlibro Local. Contributed by MikeFez (PR #21).
+# No image is published: you build it yourself from this repo. Clone the repo,
+# copy this file to docker-compose.yml, fill in the values below, then run:
+#   docker compose up -d --build
+# See docs/standalone.md for the full walkthrough.
+
+services:
+  petlibro-local:
+    build:
+      context: ./addon        # builds addon/Dockerfile from your checkout
+    image: petlibro-local     # name for the locally built image
+    container_name: petlibro-local
+    restart: unless-stopped
+    ports:
+      - "8765:8765"   # web UI
+      - "1883:1883"   # only used during device credential capture (see the note below)
+    volumes:
+      - ./data:/data  # devices, pets, settings, uploaded images and audio
+    environment:
+      # Web UI / API access token (required). There is no Home Assistant ingress
+      # in front of the UI, so /api/* (which returns your broker credentials) is
+      # protected by this token. Use a long random value, for example the output
+      # of `openssl rand -hex 32`. /api/login has no limit on attempts.
+      AUTH_TOKEN: "change-me-to-a-long-random-value"
+      # MQTT broker your feeders and fountains talk to (required)
+      MQTT_HOST: "192.168.1.10"       # your broker's host or IP
+      MQTT_PORT: "1883"
+      MQTT_USER: "petlibro"           # a dedicated broker user for this app
+      MQTT_PASS: "change-me"
+      # Home Assistant (optional, only for sending alerts through HA)
+      # HA_BASE_URL: "http://homeassistant:8123/api"
+      # HA_TOKEN: "<long-lived access token>"
+      # Timezone for schedules and logs
+      TZ: "America/New_York"
+
+# Port 1883: the app runs a small temporary broker on 1883 for the one-time
+# device credential capture. If your MQTT broker already uses 1883 on this host,
+# stop it for that step, or capture on a host where 1883 is free. In normal use
+# the app is only a client of MQTT_HOST and doesn't need 1883 published.

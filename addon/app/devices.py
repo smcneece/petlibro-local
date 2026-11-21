@@ -436,6 +436,18 @@ def _granary_settings_bundle(serial: str, overrides: dict) -> dict:
     return bundle
 
 
+def _granary_settings_sent(serial: str, bundle: dict):
+    """After a Granary settings bundle was sent, keeps what was sent as the known
+    state and publishes it, so Home Assistant's switches (Light, Buttons Lock)
+    show the new value at once. Without this they only caught up on the next
+    ATTR_GET_SERVICE poll, up to five minutes later, and a dashboard toggle
+    looked like it did nothing. The device's next report still overwrites it.
+    (PR #27, impascab)"""
+    _state.setdefault(serial, {}).update({k: v for k, v in bundle.items() if k != "audioUrl"})
+    asyncio.ensure_future(_persist_state_cache(serial))
+    asyncio.ensure_future(_publish_ha_state(serial))
+
+
 async def send_display(serial: str, display_text: str, display_icon: int, scene: str = "USER_CUSTOM") -> bool:
     """Push display content to the feeder via MQTT.
 
@@ -1114,8 +1126,51 @@ async def republish_ha_discovery(serial: str):
         custom_icon_names = [ic["name"] for ic in _storage.get_custom_icons()]
         await ha_mqtt.publish_discovery(_client_ref, serial, cfg, state, extra_icon_names=custom_icon_names)
         await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans)
+        await _publish_alert_states(serial, cfg)
     except Exception:
         _LOGGER.exception("Failed to republish HA discovery for %s...", serial[:6])
+
+
+# ── Home Assistant pet devices (issue #26) ─────────────────────────────────
+
+_pet_published: dict[str, str] = {}   # topic -> last payload, reset on each MQTT connect
+_pet_publish_day = None               # local date of the last full pet publish
+_pet_publish_lock = asyncio.Lock()
+
+
+async def publish_ha_pets():
+    """Publish every pet's Home Assistant device and current figures. Cheap to
+    call often: one read of the data file, and only changed values are sent."""
+    global _pet_publish_day
+    if _client_ref is None:
+        return
+    import datetime as _dt
+    import storage as _storage
+    async with _pet_publish_lock:
+        try:
+            data = _storage._load()
+            devices = data.get("devices", {})
+            for pet_id, pet in data.get("pets", {}).items():
+                pet = {**pet, "id": pet_id}
+                summary = _storage.pet_activity_summary(pet_id, data)
+                await ha_mqtt.publish_pet(_client_ref, pet, devices, summary, _pet_published)
+            _pet_publish_day = _dt.date.today()
+        except Exception:
+            _LOGGER.exception("Failed to publish HA pet devices")
+
+
+def schedule_ha_pets_publish():
+    asyncio.ensure_future(publish_ha_pets())
+
+
+async def retract_ha_pet(pet_id: str):
+    """Remove a deleted pet's device from Home Assistant."""
+    if _client_ref is None:
+        return
+    try:
+        await ha_mqtt.retract_pet(_client_ref, pet_id, _pet_published)
+    except Exception:
+        _LOGGER.exception("Failed to retract HA pet device")
 
 
 async def retract_ha_discovery(serial: str, cfg: dict, state: dict):
@@ -1146,8 +1201,40 @@ async def _publish_ha_state(serial: str):
         plans = _storage.get_active_feeding_plans(serial)
         await ha_mqtt.publish_state(_client_ref, serial, cfg, state, plans=plans,
                                     clock_offset=_clock_offset.get(serial))
+        await _publish_alert_states(serial, cfg)
     except Exception:
         _LOGGER.exception("Failed to publish HA state for %s...", serial[:6])
+
+
+_alert_published: dict[str, str] = {}   # topic -> last ON/OFF, reset on each MQTT connect
+
+
+def _alert_conditions(serial: str, cfg: dict) -> set:
+    """The feeder's alert conditions as they really are, ignoring the per-alert
+    notification toggles: muting a notification shouldn't blind an automation.
+    (The app's own alerts still follow the toggles, see _compute_device_alerts.)"""
+    mod = _device_types.get(cfg.get("device_type", ""))
+    if not mod:
+        return set()
+    raw_cfg = {**cfg, "serial": serial, "notifications": {}}
+    return mod.compute_alerts(_state.get(serial, {}), raw_cfg, _online.get(serial, False))
+
+
+async def _publish_alert_states(serial: str, cfg: dict | None = None):
+    """Publish the feeder alert sensors (PR #21). Not held back by the startup
+    alert suppression, which is only about notifications."""
+    if _client_ref is None:
+        return
+    try:
+        import storage as _storage
+        if cfg is None:
+            cfg = _storage.get_devices().get(serial, {})
+        if not ha_mqtt.alert_sensor_keys(serial, cfg):
+            return
+        await ha_mqtt.publish_alert_states(_client_ref, serial, cfg,
+                                           _alert_conditions(serial, cfg), _alert_published)
+    except Exception:
+        _LOGGER.exception("Failed to publish alert states for %s...", serial[:6])
 
 
 # ── HA command handling ────────────────────────────────────────────────────
@@ -1470,6 +1557,8 @@ async def _handle_ha_command(serial: str, topic: str, payload: str):
         bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
         ok = await send_command(serial, bundle)
         _LOGGER.info("HA Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
+        if ok:
+            _granary_settings_sent(serial, bundle)
     else:
         await send_command(serial, cmd)
         _LOGGER.debug("HA command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -1665,6 +1754,8 @@ async def handle_ha_command(serial: str, cmd: dict):
         bundle = _granary_settings_bundle(serial, {cmd["_granary_field"]: cmd["_granary_value"]})
         ok = await send_command(serial, bundle)
         _LOGGER.info("API Granary %s %s...: %s", cmd["_granary_field"], serial[:6], "ok" if ok else "failed")
+        if ok:
+            _granary_settings_sent(serial, bundle)
     else:
         ok = await send_command(serial, cmd)
         _LOGGER.debug("API command %s... keys=%s", serial[:6], list(cmd.keys()))
@@ -1790,6 +1881,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                                 extra={"duration_secs": duration_secs,
                                        "rfid_tag": act_tag, "pet_id": pet_id},
                             )
+                            schedule_ha_pets_publish()
                             # Auto-dismiss no-eat alert if one was firing
                             was_alerted = bool(pet_id and (_pet_no_eat_alerted.pop(pet_id, False)
                                                            or pets.get(pet_id, {}).get("no_eat_alerted_for")))
@@ -1929,6 +2021,7 @@ def _handle_message(serial: str, topic_str: str, raw: str):
                                     if pet_id:
                                         extra["pet_id"] = pet_id
                                 _storage.log_feeder_event(serial, "pet_eating", extra=extra)
+                                schedule_ha_pets_publish()
                                 _storage.save_device(serial, {"last_fed_ts": now_ts})
                             else:
                                 # Door-only: log for device history but not as a feeding event
@@ -2429,6 +2522,8 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
             asyncio.ensure_future(_publish_ha_state(serial))
         _storage.record_intake(serial, grams)
         _storage.log_fountain_event(serial, "drink", grams=grams, extra=extra)
+        if tag:
+            schedule_ha_pets_publish()
         _storage.save_device(serial, {"last_drink_ts": int(_time.time())})
 
         if pet_id and tag:
@@ -2993,6 +3088,11 @@ async def _offline_watchdog():
                     continue
                 await _poll_attr_state(serial, device_type)
 
+        # Pet "today" totals start again at local midnight (issue #26).
+        import datetime as _dt
+        if _pet_publish_day is not None and _dt.date.today() != _pet_publish_day:
+            await publish_ha_pets()
+
         try:
             await _check_missed_feeds()
         except Exception:
@@ -3098,6 +3198,7 @@ async def _mqtt_loop():
                 # an overlapping subscription and cause the broker to deliver
                 # a duplicate copy of every message).
                 await client.subscribe("dl/#")
+                _alert_published.clear()   # the broker may have lost retained states
 
                 for serial, (_, device_type) in list(_devices.items()):
                     _LOGGER.info("Registered: %s... model=%s", serial[:6], _topic_model(device_type, serial))
@@ -3119,7 +3220,13 @@ async def _mqtt_loop():
                     await ha_mqtt.publish_discovery(client, serial, cfg, state, extra_icon_names=custom_icon_names)
                     await ha_mqtt.retract_legacy_entities(client, serial, cfg)
                     await ha_mqtt.publish_state(client, serial, cfg, state, plans=plans)
+                    await _publish_alert_states(serial, cfg)
                     await ha_mqtt.publish_availability(client, serial, True)
+
+                # Pet devices (issue #26). The broker may have lost retained
+                # messages, so forget what was sent and publish everything again.
+                _pet_published.clear()
+                await publish_ha_pets()
 
                 async for message in client.messages:
                     if _reconnect_event and _reconnect_event.is_set():

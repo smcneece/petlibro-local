@@ -39,6 +39,16 @@ Petlibro Local automatically publishes MQTT discovery messages so Home Assistant
 | Last Eating Duration | Sensor | Duration in seconds of the last qualifying feeder door session, RFID or manual |
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding. Goes to unknown when there is none (schedules paused, or every plan disabled or deleted) |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
+| Low Food | Binary Sensor | On when the hopper sensor reports low or empty. That sensor isn't always reliable, so Food Refill Due is a calendar-based backup |
+| Food Refill Due | Binary Sensor | On when the food tank hasn't been marked refilled within the refill interval |
+| Desiccant Due | Binary Sensor | On when desiccant replacement is due, the same moment the app's reminder starts |
+| Bowl Cleaning Due | Binary Sensor | On when bowl cleaning is due |
+| Housing Cleaning Due | Binary Sensor | On when housing cleaning is due |
+| Backup Battery Low | Binary Sensor | On when the backup battery is at or below the low-battery level set in Edit Device |
+| On Battery Power | Binary Sensor | On while the feeder runs on its backup batteries |
+| Food Door Jammed | Binary Sensor | On when the feeder reports its food door jammed, usually something stopping it from closing |
+
+The binary sensors above are the feeder's alert conditions (`device_class: problem`), so automations can use them directly. They show the real condition even if you turned that alert's notification off in the app. They aren't published while the feeder is offline; all of its entities go unavailable then, which is how offline shows. Contributed by [@MikeFez](https://github.com/MikeFez) (PR #21).
 
 **Last Fed** updates automatically when food is dispensed, and also when the feeder door closes after being open for at least the minimum eating duration. That threshold defaults to 30 seconds and is adjustable per device in Edit Device → Minimum Eating Duration.
 
@@ -63,6 +73,15 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Last Feed Result | Sensor | How the last feed went: OK, Short (less came out than asked), Failed (nothing came out) or Busy (refused because the feeder was already dispensing). Attributes: portions dispensed and requested, error code, scheduled or manual, and the plan. Also on the One RFID |
 | Next Meal | Sensor (diagnostic) | Timestamp of the next enabled scheduled feeding |
 | Desiccant Days Remaining | Sensor (diagnostic) | Days until desiccant replacement is due |
+| Low Food | Binary Sensor | On when the hopper sensor reports low or empty. That sensor isn't always reliable, so Food Refill Due is a calendar-based backup |
+| Food Refill Due | Binary Sensor | On when the food tank hasn't been marked refilled within the refill interval |
+| Desiccant Due | Binary Sensor | On when desiccant replacement is due, the same moment the app's reminder starts |
+| Bowl Cleaning Due | Binary Sensor | On when bowl cleaning is due |
+| Housing Cleaning Due | Binary Sensor | On when housing cleaning is due |
+| Backup Battery Low | Binary Sensor | On when the backup battery is at or below the low-battery level set in Edit Device |
+| On Battery Power | Binary Sensor | On while the feeder runs on its backup batteries. Not on the camera Granary yet, the same as On AC Power |
+
+The binary sensors above are the feeder's alert conditions (`device_class: problem`), so automations can use them directly. They show the real condition even if you turned that alert's notification off in the app. The Granary has no food door, so it has no Food Door Jammed. They aren't published while the feeder is offline; all of its entities go unavailable then, which is how offline shows. Contributed by [@MikeFez](https://github.com/MikeFez) (PR #21).
 
 ## Polar Wet Food Feeder (early beta)
 
@@ -107,6 +126,23 @@ Display hours, sound hours and the schedule pause and skip controls are in the a
 | Last Drink By | Sensor | The pet whose tag was read during the last drink (Dockstream RFID Smart Fountain only) |
 
 The Dockstream RFID Smart Fountain additionally reports which pet's RFID tag was present during a drink, logged and attributed to that pet in its Recent Activity the same way the One RFID Smart Feeder attributes eating sessions.
+
+### Pets
+
+Each pet gets its own device in Home Assistant, named after the pet. The figures are the same ones the pet's Recent Activity shows: only drinks and meal visits matched to that pet count. A drink the fountain couldn't tie to a tag is never given to a pet. Which sensors a pet gets depends on the devices linked to it in the app.
+
+| Entity | Type | When | Description |
+|--------|------|------|-------------|
+| Water Today | Sensor | Linked to a Dockstream RFID Smart Fountain | mL drunk today |
+| Drinks Today | Sensor | Same | Number of drinks today |
+| Drinking Time Today | Sensor | Same | Total drinking time today, where the fountain reported it |
+| Last Drink / Last Drink Amount | Sensor | Same | When the pet last drank, and how much (mL) |
+| Feeder Visits Today | Sensor | Linked to a One RFID Smart Feeder or Polar | Meal visits today |
+| Eating Time Today | Sensor | Same | Total time at the feeder today |
+| Last Meal Visit / Last Meal Visit Duration | Sensor | Same | When the pet last ate, and for how long |
+| Weight | Sensor | A weight is set in the pet's profile | In kg |
+
+Daily figures start again at local midnight. They are kept as Home Assistant statistics, so history graphs over weeks or months work. A visit is time at the feeder, not how much food was eaten. Pet entity IDs use the pet's name when first created, for example `sensor.petlibro_jasper_water_today`; renaming the pet later keeps the same device and IDs.
 
 ## Automations and voice assistants
 

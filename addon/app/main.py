@@ -1,6 +1,7 @@
 """Petlibro Local -- aiohttp web server and main orchestrator."""
 
 import asyncio
+import hmac
 import ipaddress
 import json
 import logging
@@ -23,7 +24,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-VERSION = "2026.11.2"
+VERSION = "2026.11.3"
+
+# Deployment mode (PR #21, MikeFez). As a Home Assistant add-on the Supervisor
+# injects SUPERVISOR_TOKEN and ingress fronts the UI. A standalone Docker container
+# has neither, so /api/* (which returns MQTT broker credentials) is protected by a
+# shared AUTH_TOKEN instead.
+_IS_ADDON = bool(os.environ.get("SUPERVISOR_TOKEN"))
+_AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
+_AUTH_COOKIE = "pl_auth"
 
 # Credential capture state
 _capture_state: dict = {"status": "idle", "result": {}}
@@ -290,6 +299,8 @@ async def handle_api_device_post(request):
                 device.get("display_icon", 0),
             ))
         asyncio.ensure_future(devices.republish_ha_discovery(serial))
+        if "pet_ids" in data:
+            devices.schedule_ha_pets_publish()   # pet sensors depend on linked devices
         return web.json_response(device)
     except polar_control.PolarError as exc:
         return web.Response(status=400, text=str(exc))
@@ -379,6 +390,7 @@ async def handle_api_device_delete(request):
     await devices.retract_ha_discovery(serial, deleted_cfg, deleted_state)
     storage.delete_device(serial)
     devices.unregister_device(serial)
+    devices.schedule_ha_pets_publish()
 
     if remove_creds and mqtt_user:
         # Check if any remaining device shares this username.
@@ -571,6 +583,7 @@ async def handle_api_pet_add(request):
         data = await request.json()
         pet_id = str(uuid.uuid4())
         pet = storage.save_pet(pet_id, data)
+        devices.schedule_ha_pets_publish()
         return web.json_response(pet)
     except Exception:
         _LOGGER.exception("Failed to add pet")
@@ -582,6 +595,7 @@ async def handle_api_pet_post(request):
     try:
         data = await request.json()
         pet = storage.save_pet(pet_id, data)
+        devices.schedule_ha_pets_publish()
         return web.json_response(pet)
     except Exception:
         _LOGGER.exception("Failed to update pet %s", pet_id)
@@ -591,11 +605,34 @@ async def handle_api_pet_post(request):
 async def handle_api_pet_delete(request):
     pet_id = request.match_info["pet_id"]
     storage.delete_pet(pet_id)
+    await devices.retract_ha_pet(pet_id)
     return web.json_response({"status": "ok"})
 
 
+async def handle_api_login(request):
+    """Standalone only: trade the shared AUTH_TOKEN for a session cookie."""
+    if not _AUTH_TOKEN:
+        return web.Response(status=404, text="Auth not configured")
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(status=400, text="Bad request")
+    token = (data.get("token") or "").strip()
+    # Compared as bytes: hmac.compare_digest raises on a str with non-ASCII
+    # characters, which would turn an odd token into a 500.
+    if token and hmac.compare_digest(token.encode("utf-8"), _AUTH_TOKEN.encode("utf-8")):
+        resp = web.json_response({"ok": True})
+        resp.set_cookie(_AUTH_COOKIE, _AUTH_TOKEN, httponly=True,
+                        samesite="Lax", max_age=60 * 60 * 24 * 365)
+        return resp
+    return web.Response(status=401, text="Invalid token")
+
+
 async def handle_api_settings_get(request):
-    return web.json_response(storage.get_settings())
+    return web.json_response({
+        **storage.get_settings(),
+        "env_managed": storage.env_managed_settings(),
+    })
 
 
 async def handle_api_settings_post(request):
@@ -641,15 +678,21 @@ async def handle_api_capture_start(request):
         mosquitto_was_stopped = False
         try:
             devices.suppress_alerts(True)
-            _LOGGER.info("Stopping Mosquitto for credential capture")
-            stopped = await mosquitto.stop_mosquitto()
-            if not stopped:
-                _LOGGER.error("Failed to stop Mosquitto — capture aborted")
-                _capture_state = {"status": "error", "result": {}, "detail": "Could not stop Mosquitto. Check hassio_role: manager is set in config.yaml and rebuild the add-on."}
-                return
-            mosquitto_was_stopped = True
-            # Give Mosquitto a moment to release port 1883 before the mini broker tries to bind
-            await asyncio.sleep(3)
+            # As an add-on, port 1883 is freed by stopping the Mosquitto add-on
+            # through the Supervisor. Standalone there is no Supervisor, so the
+            # user frees 1883 themselves for the capture (docs/standalone.md).
+            if _IS_ADDON:
+                _LOGGER.info("Stopping Mosquitto for credential capture")
+                stopped = await mosquitto.stop_mosquitto()
+                if not stopped:
+                    _LOGGER.error("Failed to stop Mosquitto — capture aborted")
+                    _capture_state = {"status": "error", "result": {}, "detail": "Could not stop Mosquitto. Check hassio_role: manager is set in config.yaml and rebuild the add-on."}
+                    return
+                mosquitto_was_stopped = True
+                # Give Mosquitto a moment to release port 1883 before the mini broker tries to bind
+                await asyncio.sleep(3)
+            else:
+                _LOGGER.info("Running standalone: port 1883 must be free (stop your MQTT broker) for capture")
 
             known_serials = frozenset(storage.get_devices().keys())
             creds = await mqtt_broker.capture_credentials(timeout_seconds=60, known_serials=known_serials)
@@ -818,52 +861,12 @@ async def handle_api_fountain_log(request):
 
 
 async def handle_api_pet_log(request):
-    """Return feeder activity events for a specific pet, newest first."""
+    """Return this pet's feeder and fountain events, newest first. The matching
+    rules live in storage.pet_events, shared with the Home Assistant pet sensors."""
     pet_id = request.match_info["pet_id"]
     limit  = min(int(request.query.get("limit", 60)), 200)
-
-    pets = storage.get_pets()
-    pet = pets.get(pet_id, {})
-    pet_rfid = str(pet.get("rfid_tag")) if pet.get("rfid_tag") else None
-
-    events = []
-    devices = storage.get_devices()
-    for serial, cfg in devices.items():
-        pet_ids = cfg.get("pet_ids", [])
-        if pet_id not in pet_ids:
-            continue
-        sole_pet = (len(pet_ids) == 1 and pet_id in pet_ids)
-        log = storage.get_feeder_log(serial, limit)
-        for entry in log:
-            entry_rfid = str(entry.get("rfid_tag")) if entry.get("rfid_tag") else None
-            if (
-                entry.get("pet_id") == pet_id
-                or (pet_rfid and entry_rfid == pet_rfid)
-                or (sole_pet and entry.get("type") == "pet_eating")
-            ):
-                events.append({**entry, "serial": serial,
-                                "device_name": cfg.get("name") or serial[:8]})
-
-        if cfg.get("device_type", "").startswith("dockstream"):
-            flog = storage.get_fountain_log(serial, limit)
-            for entry in flog:
-                entry_rfid = str(entry.get("rfid_tag")) if entry.get("rfid_tag") else None
-                # Only RFID-confirmed drinks count as this pet's activity --
-                # same rule as the feeder's pet_eating entries, which only
-                # ever exist when an RFID scan triggered them in the first
-                # place. A plain weight-drop "drink" with no rfid_tag is
-                # never attributed, even in a single-pet household.
-                if not entry_rfid:
-                    continue
-                if (
-                    entry.get("pet_id") == pet_id
-                    or (pet_rfid and entry_rfid == pet_rfid)
-                    or sole_pet
-                ):
-                    events.append({**entry, "serial": serial,
-                                    "device_name": cfg.get("name") or serial[:8]})
-    events.sort(key=lambda e: e.get("ts", 0), reverse=True)
-    return web.json_response(events[:limit])
+    events = storage.pet_events(pet_id)
+    return web.json_response(list(reversed(events))[:limit])
 
 
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -1040,20 +1043,37 @@ async def _restrict_api_middleware(request, handler):
     unauthenticated, by design.
     """
     if request.path.startswith("/api/"):
-        try:
-            remote_ip = ipaddress.ip_address(request.remote)
-        except (ValueError, TypeError):
-            remote_ip = None
-        if remote_ip is None or remote_ip != _INGRESS_PROXY:
-            _LOGGER.warning("Blocked /api/* request from outside the internal network: %s %s",
-                            request.remote, request.path)
-            return web.Response(status=403, text="Forbidden")
+        if _IS_ADDON:
+            # Add-on: only HA Supervisor's ingress proxy may reach /api/*.
+            try:
+                remote_ip = ipaddress.ip_address(request.remote)
+            except (ValueError, TypeError):
+                remote_ip = None
+            if remote_ip is None or remote_ip != _INGRESS_PROXY:
+                _LOGGER.warning("Blocked /api/* request from outside the internal network: %s %s",
+                                request.remote, request.path)
+                return web.Response(status=403, text="Forbidden")
+        elif request.path != "/api/login":
+            # Standalone: no ingress proxy, so require the AUTH_TOKEN cookie set by
+            # /api/login. A 401 makes the UI ask for the token.
+            cookie = request.cookies.get(_AUTH_COOKIE, "")
+            if not (_AUTH_TOKEN and hmac.compare_digest(cookie.encode("utf-8"), _AUTH_TOKEN.encode("utf-8"))):
+                return web.Response(status=401, text="Unauthorized")
     resp = await handler(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     return resp
 
 
 def main():
+    # Standalone has nothing in front of /api/*, so refuse to start without
+    # AUTH_TOKEN rather than leave the broker credentials open.
+    if not _IS_ADDON and not _AUTH_TOKEN:
+        _LOGGER.error(
+            "Refusing to start: running standalone without AUTH_TOKEN. Set AUTH_TOKEN "
+            "to a long random value (see docs/standalone.md) to protect the web UI and API."
+        )
+        raise SystemExit(1)
+
     app = web.Application(middlewares=[_restrict_api_middleware])
     app.on_startup.append(on_startup)
 
@@ -1100,6 +1120,7 @@ def main():
     app.router.add_post("/api/pets/{pet_id}/image",      handle_api_pet_image_upload)
     app.router.add_get("/api/pets/{pet_id}/log",         handle_api_pet_log)
 
+    app.router.add_post("/api/login",                    handle_api_login)
     app.router.add_get("/api/settings",                  handle_api_settings_get)
     app.router.add_post("/api/settings",                 handle_api_settings_post)
 

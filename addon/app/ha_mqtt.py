@@ -220,6 +220,45 @@ def feed_portions(cfg: dict) -> int:
     return max(1, min(max_feed_portions(cfg.get("device_type", "")), n))
 
 
+# Feeder alert conditions as Home Assistant problem binary_sensors (PR #21,
+# MikeFez), so automations can use them directly, the same way the fountain has
+# Low Water and Cleaning Overdue. Driven by each device module's ALERT_MESSAGES,
+# so a new feeder alert only needs a name and icon here.
+#
+# 'offline' is not exposed: every entity shares the device availability topic,
+# so it would read 'unavailable' exactly when it should be on. HA already shows
+# offline as the whole device going unavailable.
+_ALERT_SENSOR_TYPES = ("one_rfid", "granary")
+_ALERT_SENSOR_META = {
+    "food_low":        ("Low Food",             "mdi:food-off-outline"),
+    "food_refill_due": ("Food Refill Due",      "mdi:silo-outline"),
+    "desiccant_due":   ("Desiccant Due",        "mdi:air-filter"),
+    "bowl_due":        ("Bowl Cleaning Due",    "mdi:bowl-outline"),
+    "housing_due":     ("Housing Cleaning Due", "mdi:spray-bottle-outline"),
+    "battery_low":     ("Backup Battery Low",   "mdi:battery-alert"),
+    "power_battery":   ("On Battery Power",     "mdi:power-plug-off"),
+    "door_jam":        ("Food Door Jammed",     "mdi:door-closed-lock"),
+}
+
+
+def alert_sensor_keys(serial: str, cfg: dict) -> list[str]:
+    """Alert sensors this feeder gets, in a stable order: the keys its module
+    defines (the Granary has no food door, so no Food Door Jammed). The camera
+    Granary gets no On Battery Power, the same as On AC Power, because its power
+    readings aren't confirmed."""
+    device_type = cfg.get("device_type", "")
+    if device_type not in _ALERT_SENSOR_TYPES:
+        return []
+    import device_types as _device_types
+    mod = _device_types.get(device_type)
+    if not mod:
+        return []
+    keys = [k for k in _ALERT_SENSOR_META if k in getattr(mod, "ALERT_MESSAGES", {})]
+    if device_type == "granary" and not _granary_power_confirmed(serial, cfg):
+        keys = [k for k in keys if k != "power_battery"]
+    return keys
+
+
 def _e(serial: str, key: str, b: dict, extra: dict) -> dict:
     """Merge base with stable unique_id + object_id and entity-specific fields."""
     return {**b, "unique_id": _oid(serial, key), "object_id": _obj_id(serial, key), **extra}
@@ -758,6 +797,18 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
         })))
 
     if device_type in ("one_rfid", "granary"):
+        # Each alert condition as its own problem binary_sensor (PR #21). States
+        # come from publish_alert_states.
+        for akey in alert_sensor_keys(serial, cfg):
+            name, icon = _ALERT_SENSOR_META[akey]
+            entities.append(("binary_sensor", akey, _e(serial, akey, b, {
+                "name":         name,
+                "state_topic":  state_topic(serial, akey),
+                "device_class": "problem",
+                "payload_on":   "ON",
+                "payload_off":  "OFF",
+                "icon":         icon,
+            })))
         # issue #24: how the last dispense went, from the feeder's own GRAIN_END
         entities.append(("sensor", "last_feed_result", _e(serial, "last_feed_result", b, {
             "name":                  "Last Feed Result",
@@ -807,6 +858,152 @@ async def retract_discovery(client, serial: str, cfg: dict, state: dict):
         topic = _disc_topic(component, serial, key)
         await client.publish(topic, "", retain=True)
     _LOGGER.info("Discovery: retracted %d entities for %s...", len(configs), serial[:6])
+
+
+# ── Pet devices (issue #26) ────────────────────────────────────────────────
+# One Home Assistant device per pet, with today's totals and the latest drink
+# and meal visit. Figures come from storage.pet_activity_summary, the same
+# events the pet page shows. Identifiers use the pet's internal id, so renaming
+# a pet or changing its tag keeps the same device.
+
+PET_EATING_TYPES = {"one_rfid", "polar"}       # feeders that log tagged meal visits
+PET_DRINKING_TYPES = {"dockstream_rfid"}       # the only fountain that reads tags
+
+# key -> (group, discovery fields). Group decides when the sensor exists.
+_PET_SENSORS = {
+    "water_today":          ("drink", {"name": "Water Today", "unit_of_measurement": "mL", "suggested_display_precision": 0,
+                                       "device_class": "volume", "state_class": "total_increasing",
+                                       "icon": "mdi:cup-water"}),
+    "drinks_today":         ("drink", {"name": "Drinks Today", "state_class": "total_increasing",
+                                       "icon": "mdi:counter"}),
+    "drinking_time_today":  ("drink", {"name": "Drinking Time Today", "unit_of_measurement": "s",
+                                       "device_class": "duration", "suggested_display_precision": 0, "state_class": "total_increasing"}),
+    "last_drink":           ("drink", {"name": "Last Drink", "device_class": "timestamp"}),
+    "last_drink_amount":    ("drink", {"name": "Last Drink Amount", "unit_of_measurement": "mL", "suggested_display_precision": 0,
+                                       "device_class": "volume", "icon": "mdi:water"}),
+    "eating_visits_today":  ("eat",   {"name": "Feeder Visits Today", "state_class": "total_increasing",
+                                       "icon": "mdi:counter"}),
+    "eating_time_today":    ("eat",   {"name": "Eating Time Today", "unit_of_measurement": "s",
+                                       "device_class": "duration", "suggested_display_precision": 0, "state_class": "total_increasing"}),
+    "last_eating":          ("eat",   {"name": "Last Meal Visit", "device_class": "timestamp"}),
+    "last_eating_duration": ("eat",   {"name": "Last Meal Visit Duration", "unit_of_measurement": "s",
+                                       "device_class": "duration", "suggested_display_precision": 0}),
+    "weight":               ("weight", {"name": "Weight", "unit_of_measurement": "kg",
+                                        "device_class": "weight", "state_class": "measurement"}),
+}
+
+
+def _pet_node(pet_id: str) -> str:
+    return f"pet_{pet_id}"
+
+
+def pet_state_topic(pet_id: str, key: str) -> str:
+    return f"{_STATE_PREFIX}/{_pet_node(pet_id)}/{key}/state"
+
+
+def _pet_slug(name: str, pet_id: str) -> str:
+    slug = __import__("re").sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+    return slug or pet_id[:8]
+
+
+def pet_sensor_keys(pet: dict, devices: dict) -> list[str]:
+    """Sensors this pet gets: drinking ones if it's linked to an RFID fountain,
+    meal-visit ones if linked to an RFID feeder, Weight if one is set."""
+    types = {cfg.get("device_type", "") for cfg in devices.values()
+             if pet.get("id") in cfg.get("pet_ids", [])}
+    groups = set()
+    if types & PET_DRINKING_TYPES:
+        groups.add("drink")
+    if types & PET_EATING_TYPES:
+        groups.add("eat")
+    if pet.get("weight_kg") not in (None, ""):
+        groups.add("weight")
+    return [k for k, (g, _) in _PET_SENSORS.items() if g in groups]
+
+
+def pet_entity_configs(pet: dict, devices: dict) -> list[tuple[str, dict]]:
+    pet_id = pet["id"]
+    name = pet.get("name") or "Pet"
+    device = {
+        "identifiers":  [f"petlibro_local_{_pet_node(pet_id)}"],
+        "name":         name,
+        "manufacturer": "Petlibro Local",
+        "model":        "Pet",
+    }
+    out = []
+    for key in pet_sensor_keys(pet, devices):
+        fields = _PET_SENSORS[key][1]
+        out.append((key, {
+            "has_entity_name": True,
+            "device":          device,
+            "unique_id":       f"petlibro_{_pet_node(pet_id)}_{key}",
+            "default_entity_id": f"sensor.petlibro_{_pet_slug(name, pet_id)}_{key}",
+            "state_topic":     pet_state_topic(pet_id, key),
+            **fields,
+        }))
+    return out
+
+
+def pet_state_values(pet: dict, summary: dict) -> dict:
+    """State payloads for each sensor. Timestamps as ISO 8601 UTC; a missing
+    'last' value is left out (HA keeps it unknown) rather than sent as None."""
+    import datetime as _dt
+    vals = {}
+    for key in ("water_today", "drinks_today", "drinking_time_today",
+                "eating_visits_today", "eating_time_today"):
+        vals[key] = str(summary.get(key, 0))
+    for key in ("last_drink", "last_eating"):
+        ts = summary.get(key)
+        if ts:
+            vals[key] = _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).isoformat()
+    if summary.get("last_drink_amount") is not None:
+        vals["last_drink_amount"] = str(summary["last_drink_amount"])
+    if summary.get("last_eating_duration") is not None:
+        vals["last_eating_duration"] = str(summary["last_eating_duration"])
+    if pet.get("weight_kg") not in (None, ""):
+        try:
+            vals["weight"] = str(round(float(pet["weight_kg"]), 2))
+        except (TypeError, ValueError):
+            pass
+    return vals
+
+
+async def publish_pet(client, pet: dict, devices: dict, summary: dict, published: dict):
+    """Publish one pet's discovery and states. `published` maps topic -> last
+    payload sent this session, so unchanged values aren't re-sent every time.
+    Sensors the pet no longer has (unlinked from a fountain, weight cleared)
+    are removed from Home Assistant."""
+    pet_id = pet["id"]
+    configs = pet_entity_configs(pet, devices)
+    keys = {k for k, _ in configs}
+    for key, config in configs:
+        topic = f"{_DISCOVERY_PREFIX}/sensor/{config['unique_id']}/config"
+        payload = json.dumps(config)
+        if published.get(topic) != payload:
+            await client.publish(topic, payload, retain=True)
+            published[topic] = payload
+    for key in _PET_SENSORS:
+        if key not in keys:
+            topic = f"{_DISCOVERY_PREFIX}/sensor/petlibro_{_pet_node(pet_id)}_{key}/config"
+            if published.get(topic) != "":
+                await client.publish(topic, "", retain=True)
+                published[topic] = ""
+    for key, value in pet_state_values(pet, summary).items():
+        if key not in keys:
+            continue
+        topic = pet_state_topic(pet_id, key)
+        if published.get(topic) != value:
+            await client.publish(topic, value, retain=True)
+            published[topic] = value
+
+
+async def retract_pet(client, pet_id: str, published: dict):
+    """Remove a deleted pet's device from Home Assistant, and its retained states."""
+    for key in _PET_SENSORS:
+        await client.publish(f"{_DISCOVERY_PREFIX}/sensor/petlibro_{_pet_node(pet_id)}_{key}/config", "", retain=True)
+        await client.publish(pet_state_topic(pet_id, key), "", retain=True)
+    for topic in [t for t in published if f"/{_pet_node(pet_id)}" in t or f"_{_pet_node(pet_id)}_" in t]:
+        published.pop(topic, None)
 
 
 async def publish_availability(client, serial: str, online: bool):
@@ -1132,6 +1329,18 @@ async def publish_state(client, serial: str, cfg: dict, state: dict, plans: list
         await client.publish(state_topic(serial, "last_feed_result"), r.get("result", "OK"), retain=True)
         await client.publish(state_topic(serial, "last_feed_result_attrs"),
                              json.dumps({k: v for k, v in r.items() if k != "result"}), retain=True)
+
+
+async def publish_alert_states(client, serial: str, cfg: dict, active_alerts, published: dict):
+    """ON/OFF for each alert sensor. Every key is sent, so a cleared condition
+    turns its sensor off instead of leaving a stale retained ON. `published`
+    holds the last payload per topic, so unchanged states aren't re-sent."""
+    for akey in alert_sensor_keys(serial, cfg):
+        topic = state_topic(serial, akey)
+        val = "ON" if akey in active_alerts else "OFF"
+        if published.get(topic) != val:
+            await client.publish(topic, val, retain=True)
+            published[topic] = val
 
 
 def parse_command(topic: str, payload: str, device_type: str = "") -> dict | None:
