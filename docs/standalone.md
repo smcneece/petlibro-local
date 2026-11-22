@@ -13,7 +13,7 @@ There are two ways to run it:
 
 ## All-in-one stack with its own Mosquitto
 
-Written for a server on the same LAN as the devices, with the DNS override done in the router (see [networking.md](networking.md)). The stack is two containers:
+Written for a server on the same LAN as the devices, with the DNS override done in the router (see [OpenWrt](openwrt.md); the general idea is in [networking.md](networking.md)). The stack is two containers:
 
 - `mosquitto` (the official `eclipse-mosquitto:2` image) publishes port 1883. Anonymous access is off; every login is a line in a password file.
 - `petlibro-local` publishes the web UI on port 8765. It shares the broker's process namespace and the password file volume, so when you add or remove a device it writes the login to the file and sends Mosquitto a reload signal (`SIGHUP`). No restart, so the other devices stay connected.
@@ -61,8 +61,8 @@ Never share the log without removing the username, password, serial and Wi-Fi na
 
 - **Adopting a device that already has plans in the PetLibro cloud replaces them.** When the device first asks for its feeding plans, the app answers with its own list, which is empty at that point, and the device deletes what it had. Write the plans again right after adding the device (Schedule tab; note them down beforehand, plan times in the PetLibro app are your local time).
 - **Restarting the Mosquitto container reboots the devices** (see [networking.md](networking.md#restarting-mosquitto-reboots-your-devices)), and also restarts the app, which shares its process namespace. Avoid it near a feeding time. `docker compose up -d --build` after changing only the app does not touch the broker.
-- **The server's firewall.** If the server runs `ufw` or another host firewall that drops incoming traffic, the device's connection to port 1883 never arrives and nothing says why. Allow the device (`sudo ufw allow from <device-ip> to any port 1883 proto tcp`).
-- **LAN only.** Port 1883 has no encryption, and every device of a model shares one login, with no per-device restrictions. Never forward it from the internet, and keep the devices off the internet once they work locally (blocking the device's internet access in your router does it). Port 8765 sits behind the `AUTH_TOKEN`, but it is plain HTTP; publish it on a LAN address only (`"192.168.1.10:8765:8765"` in the compose file) if the server is reachable from elsewhere.
+- **The server's firewall.** If the server runs `ufw` or another host firewall that drops incoming traffic, the device's connection to port 1883 never arrives and nothing says why. Allow the device (`sudo ufw allow from <device-ip> to any port 1883 proto tcp`); see [OpenWrt, 3d](openwrt.md#3-keep-the-device-on-the-local-broker).
+- **LAN only.** Port 1883 has no encryption, and every device of a model shares one login, with no per-device restrictions. Never forward it from the internet, and keep the devices off the internet once they work locally (the OpenWrt page has the rule). Port 8765 sits behind the `AUTH_TOKEN`, but it is plain HTTP; publish it on a LAN address only (`"192.168.1.10:8765:8765"` in the compose file) if the server is reachable from elsewhere.
 - **Give the server a fixed address.** The DNS override points at it. Use a DHCP reservation or a static IP, and a wired connection if you can.
 - **Home Assistant** is optional here. Set `HA_BASE_URL` and `HA_TOKEN` in the compose file's environment to send alerts through it (see the last section). Discovery messages are still published to the broker; they do nothing unless Home Assistant connects to it.
 

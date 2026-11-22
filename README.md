@@ -176,7 +176,7 @@ Once the repository is added:
 
 Running Home Assistant in a container, or not at all? The same app runs as a plain Docker container that you build yourself. See [Running standalone](docs/standalone.md). Contributed by [@MikeFez](https://github.com/MikeFez).
 
-- **With its own Mosquitto broker:** [docker-compose.standalone.yml](docker-compose.standalone.yml) starts the broker and the app together, and the app adds each device's broker login itself, without restarting the broker. Meant for a server on the same LAN as the devices, with the DNS override in your router.
+- **With its own Mosquitto broker:** [docker-compose.standalone.yml](docker-compose.standalone.yml) starts the broker and the app together, and the app adds each device's broker login itself, without restarting the broker. Meant for a server on the same LAN as the devices, with the DNS override in your router (an [OpenWrt guide](docs/openwrt.md) is included).
 - **With a broker you already run:** [docker-compose.example.yml](docker-compose.example.yml), the app is only a client of it.
 
 ---
