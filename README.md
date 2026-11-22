@@ -120,7 +120,7 @@ The One RFID and Granary feeders dispense through a fixed-volume scoop rather th
 - **Mosquitto broker app** (`core_mosquitto`): must be installed and running before Petlibro Local is installed. The app manages Mosquitto logins and stops/starts Mosquitto during credential capture (which reboots your devices for a minute or two, see [Restarting Mosquitto Reboots Your Devices](#restarting-mosquitto-reboots-your-devices)).
 - **Local DNS override**: the hostname `mqtt.us.petlibro.com` must resolve to your Home Assistant IP on your local network. Pi-hole, AdGuard Home, and most router DNS overrides work. Without this, devices will continue connecting to the Petlibro cloud.
 
-The Home Assistant OS and Mosquitto app requirements are for the add-on. Without Home Assistant OS (Home Assistant Container, or no Home Assistant at all), you can run Petlibro Local as a Docker container you build yourself, with your own MQTT broker. See [Standalone (Docker)](#standalone-docker-without-home-assistant-os).
+The Home Assistant OS and Mosquitto app requirements are for the add-on. Without Home Assistant OS (Home Assistant Container, or no Home Assistant at all), you can run Petlibro Local as a Docker container you build yourself, with your own MQTT broker or one started in the same compose stack. See [Standalone (Docker)](#standalone-docker-without-home-assistant-os).
 
 ---
 
@@ -174,7 +174,10 @@ Once the repository is added:
 
 ### Standalone (Docker, without Home Assistant OS)
 
-Running Home Assistant in a container, or not at all? The same app runs as a plain Docker container that you build yourself, pointed at your own MQTT broker. See [Running standalone](docs/standalone.md) and [docker-compose.example.yml](docker-compose.example.yml). Contributed by [@MikeFez](https://github.com/MikeFez).
+Running Home Assistant in a container, or not at all? The same app runs as a plain Docker container that you build yourself. See [Running standalone](docs/standalone.md). Contributed by [@MikeFez](https://github.com/MikeFez).
+
+- **With its own Mosquitto broker:** [docker-compose.standalone.yml](docker-compose.standalone.yml) starts the broker and the app together, and the app adds each device's broker login itself, without restarting the broker. Meant for a server on the same LAN as the devices, with the DNS override in your router.
+- **With a broker you already run:** [docker-compose.example.yml](docker-compose.example.yml), the app is only a client of it.
 
 ---
 

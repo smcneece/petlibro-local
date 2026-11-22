@@ -1,0 +1,61 @@
+# Standalone Petlibro Local with its own Mosquitto broker, no Home Assistant needed.
+# One stack: the broker plus the app. The app adds and removes each device's broker
+# login itself and reloads Mosquitto in place (SIGHUP, no restart), so devices stay
+# connected. No image is published: it is built from this repo.
+#
+#   cp .env.example .env     # then set AUTH_TOKEN and MQTT_PASS in .env
+#   docker compose -f docker-compose.standalone.yml up -d --build
+#
+# Already have your own MQTT broker? Use docker-compose.example.yml instead.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: petlibro-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # devices connect here (mqtt.us.petlibro.com must resolve to this host)
+    # entrypoint.sh creates the password file if missing, then starts Mosquitto as usual.
+    entrypoint: ["/bin/sh", "/mosquitto/config/entrypoint.sh"]
+    command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    volumes:
+      - ./mosquitto:/mosquitto/config:ro
+      - mosquitto-auth:/mosquitto/auth    # password file, shared with the app
+      - mosquitto-data:/mosquitto/data
+
+  petlibro-local:
+    build:
+      context: ./addon        # builds addon/Dockerfile from your checkout
+    image: petlibro-local     # name for the locally built image
+    container_name: petlibro-local
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    # Shares Mosquitto's process namespace so the app can find it and send SIGHUP. The
+    # image's s6 init needs to be PID 1, which it can't be here, so start the app directly
+    # (what run.sh does).
+    pid: "service:mosquitto"
+    entrypoint: ["python3", "/app/main.py"]
+    ports:
+      - "8765:8765"   # web UI
+    volumes:
+      - ./data:/data  # devices, pets, settings, uploaded images and audio
+      - mosquitto-auth:/mosquitto/auth
+    environment:
+      # Web UI / API access token (required), from .env. Use a long random value,
+      # for example the output of `openssl rand -hex 32`.
+      AUTH_TOKEN: "${AUTH_TOKEN:?Set AUTH_TOKEN in .env (copy .env.example)}"
+      # The app's own login on the broker. The app creates it in the password file on startup.
+      MQTT_HOST: "mosquitto"
+      MQTT_PORT: "1883"
+      MQTT_USER: "${MQTT_USER:-petlibro}"
+      MQTT_PASS: "${MQTT_PASS:?Set MQTT_PASS in .env (copy .env.example)}"
+      MOSQUITTO_PASSWD_FILE: "/mosquitto/auth/passwd"
+      # Home Assistant (optional, only for sending alerts through HA)
+      # HA_BASE_URL: "http://homeassistant:8123/api"
+      # HA_TOKEN: "<long-lived access token>"
+      TZ: "${TZ:-UTC}"
+
+volumes:
+  mosquitto-auth:
+  mosquitto-data:

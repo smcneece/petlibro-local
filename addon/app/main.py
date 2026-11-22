@@ -320,7 +320,8 @@ async def handle_api_device_add(request):
         # Ensure device credentials are in Mosquitto BEFORE saving anything, so a
         # username that belongs to a login we did not create is refused without
         # touching an existing device's config. add_mosquitto_login is idempotent;
-        # if credentials were newly added we restart Mosquitto so it picks them up.
+        # if credentials were newly added we restart Mosquitto so it picks them up
+        # (the password-file backend reloads Mosquitto in place instead, no restart).
         existing = storage.get_devices().get(serial, {})
         mqtt_user = data.get("mqtt_user", existing.get("mqtt_user", ""))
         mqtt_pass = data.get("mqtt_pass", existing.get("mqtt_pass", ""))
@@ -354,7 +355,7 @@ async def handle_api_device_add(request):
         if model:
             devices.register_device(serial, model, device_type)
         if mqtt_user and mqtt_pass:
-            if login_result == "added":
+            if login_result == "added" and not mosquitto.passwd_backend_active():
                 # Newly added — restart Mosquitto so it picks up the new credentials.
                 # Suppress offline alerts briefly while devices reconnect.
                 _LOGGER.info("New Mosquitto login for %s... — restarting broker", mqtt_user[:4])
@@ -423,7 +424,7 @@ async def handle_api_device_delete(request):
         else:
             _LOGGER.info("Mosquitto login %s... retained — still used by another device with same credentials", mqtt_user[:4])
 
-        if needs_restart:
+        if needs_restart and not mosquitto.passwd_backend_active():
             devices.suppress_alerts(True)
             await mosquitto.stop_mosquitto()
             await asyncio.sleep(2)
@@ -447,9 +448,12 @@ async def handle_api_device_resave_creds(request):
     if result == "conflict":
         return web.json_response({"status": "error", "detail": "A Mosquitto login with this username already exists and was not created by Petlibro Local"}, status=409)
     if result == "error":
-        return web.json_response({"status": "error", "detail": "Supervisor API call failed — check add-on logs"}, status=500)
+        detail = ("Could not write the Mosquitto password file — check the logs" if mosquitto.passwd_backend_active()
+                  else "Supervisor API call failed — check add-on logs")
+        return web.json_response({"status": "error", "detail": detail}, status=500)
     if result == "added":
         storage.add_owned_login(mqtt_user)
+    if result == "added" and not mosquitto.passwd_backend_active():
         devices.suppress_alerts(True)
         await mosquitto.stop_mosquitto()
         await asyncio.sleep(2)
@@ -668,6 +672,12 @@ _capture_task = None
 
 async def handle_api_capture_start(request):
     global _capture_state, _capture_task
+    if mosquitto.passwd_backend_active():
+        # Port 1883 belongs to the stack's own Mosquitto, so the capture broker can't run.
+        return web.Response(status=409, text=(
+            "Auto Setup is not available with the built-in Mosquitto broker, which owns port 1883. "
+            "Use Manual Setup with the device login captured once per model with "
+            "tools/mqtt_proxy.py (see docs/standalone.md)."))
     if _capture_state["status"] == "capturing" or (_capture_task is not None and not _capture_task.done()):
         return web.json_response({"status": "capturing"})
 
@@ -1012,6 +1022,8 @@ async def on_startup(app):
         device_type = cfg.get("device_type", "")
         if model:
             devices.register_device(serial, model, device_type)
+    if mosquitto.passwd_backend_active():
+        await mosquitto.ensure_app_login(settings["mqtt_user"], settings["mqtt_pass"])
     devices.suppress_alerts(True)
     try:
         devices.migrate_plan_days_to_utc()   # one time, issue #28
