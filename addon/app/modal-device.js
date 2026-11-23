@@ -250,6 +250,7 @@ function buildOverviewTab(device) {
     const lightOn    = !!device.lightSwitch;
     const lockOn     = !!device.disableHardwareButton;
     const volume     = device.volume ?? 50;
+    const air        = isAirFeeder(device);
     return `<div class="detail-stats">
       <div class="detail-stat" style="padding:8px 14px">
         <div class="detail-stat-label">${t("overview.food_level")}</div>
@@ -275,15 +276,15 @@ function buildOverviewTab(device) {
         <span class="toggle-label">${t("overview.light")}</span>
         <button class="toggle-switch ${lightOn ? "sw-on" : "sw-off"}" id="ctrl-granary-light"></button>
       </div>
-      <div class="toggle-row">
+      ${air ? "" : `<div class="toggle-row">
         <span class="toggle-label">${t("overview.buttons_lock")}</span>
         <button class="toggle-switch ${lockOn ? "sw-on" : "sw-off"}" id="ctrl-granary-lock"></button>
-      </div>
+      </div>`}
     </div>
-    <div class="form-row" style="margin-top:8px">
+    ${air ? "" : `<div class="form-row" style="margin-top:8px">
       <label class="form-label">${t("overview.volume")}</label>
       <input class="form-input" id="feeder-granary-volume" type="number" min="0" max="100" value="${volume}">
-    </div>`;
+    </div>`}`;
   }
 
   return `<div class="detail-stats">

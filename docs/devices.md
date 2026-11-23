@@ -30,6 +30,26 @@ Thanks to the owners of the repositories above, whose published work made this p
 
 **Granary Smart Camera Feeder (PLAF203, serial starting AF03):** Basic support only, from one owner's capture. It talks on MQTT model `PLAF203` and otherwise behaves like the Granary: Feed Now, feeding plans, Last Fed and the clock correction use the same messages, but I have not tested Feed Now or the Light and Buttons Lock switches on one. The camera is not supported, so there is no video. Its many camera settings are stored but not shown, and its camera access token is never stored. Its power readings are inconsistent (three different values in one boot), so no power alerts are built. If you own one, please tell me what works and what doesn't.
 
+## Air Smart Feeder (PLAF108, beta)
+
+Built from one owner's capture of the real PetLibro cloud talking to a feeder (firmware 2.0.14, hardware 1.0.0), and run on that same feeder against Petlibro Local with its own broker. Serial prefix `AF04`; the MQTT model, in the topics and in `DEVICE_START_EVENT`, is `PLAF108`. It connects with plain MQTT on port 1883 like the other feeders, so the DNS override works for it. It is added as a Granary device (the app shows the Granary type, with the model name PLAF108 learned from the feeder's own messages).
+
+**What works:**
+- **Feed Now** with a number of portions, and the feeder's progress (`GRAIN_START`, `GRAIN_END`), which feeds Last Fed and the log. Manual feeds sent from Petlibro Local have run on the real feeder for several days without problems; the command and the progress handling were also checked against a simulated feeder (`tools/replay_capture.py`).
+- **Feeding plans:** the same messages as the Granary. The app replaces the feeder's whole list, a disabled plan is simply not sent, and plan times are UTC on the wire. Scheduled meals have run on the real feeder for several days without problems.
+- **Light:** on and off, with the state shown back, checked on the real feeder from Petlibro Local. The feeder acknowledges and reports `lightSwitch` and `enableLight`.
+- **State:** food present, battery percentage, Wi-Fi signal, firmware and hardware versions, and the clock (the app answers its time requests, like for every model).
+
+**How it differs from the Granary:**
+- The light command has the shape the fountains use (`lightSwitch`, `lightAgingType`, the start and end times and their `Utc` twins, `filterLedSwitch`), not the Granary's group of settings. The default hours the cloud sent were 08:00 to 20:00 local.
+- There is no volume and no Buttons Lock. The PetLibro app never sent those to this feeder, so they are hidden in the app and in Home Assistant, and commands for them are refused.
+- No power alerts. At boot it reports `powerType` 2 with `batteryState` `USING` and 100 %, which could be battery or mains; I could not tell, so I did not guess.
+- No picture is bundled for it, so the card shows the generic feeder icon.
+
+**Not built:** the cloud's public API lists more fields for this model (vacuum and pump state, sleep mode, grain outlet blocked, desiccant days remaining, cover close speed), but this firmware and the PetLibro app version the owner used never showed them, so nothing is guessed. The portions limit stays at the Granary's 12 (the cloud API suggests the Air takes up to 16).
+
+**Before you move a feeder from the cloud to your own server:** when it first asks for its feeding plans, the app answers with its own list. If that is empty the feeder deletes the plans it had, so note them down (times in the PetLibro app are local, the feeder stores UTC) and add them in the Schedule tab right after adding the feeder. If something does not work, please [open an issue](https://github.com/smcneece/petlibro-local/issues) with the log from around the time you tried it.
+
 **WF01 units:** Some Dockstream 2 boxes/units are labeled "PLWF105" rather than "PLWF106". A real MQTT capture (issue #8) confirmed a `WF01`-prefixed unit reports `PLWF106` over the wire regardless, so it's treated identically to `WF03`.
 
 **Color variant encoding:** On the Dockstream 2, I think the serial number encodes the color variant. The characters at positions 10-11 appear to indicate color: `BD` = black, `BA` = white. If other owners of the Dockstream 2 fountains could also let me know by opening an issue.
@@ -47,6 +67,7 @@ Thanks to the owners of the repositories above, whose published work made this p
 | One RFID Smart Feeder | 3.0.72 | 5.0.0 |
 | One RFID Smart Feeder | 2.0.47 | 4.0.0 |
 | Dockstream 2 Smart Fountain | 0.0.34 | 1.0.0 |
+| Air Smart Feeder | 2.0.14 | 1.0.0 |
 
 I have seen the cordless fountain on firmware 0.3.61, the RFID fountain on 1.0.16 and the Granary on 1.1.15 (hardware 1.0.0). If yours shows a different one (it's at the top of the device's modal), please [open an issue](https://github.com/smcneece/petlibro-local/issues) and tell me, since newer firmware may behave differently.
 

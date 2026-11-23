@@ -181,6 +181,9 @@ const DEVICE_TYPE_MAP = {
   // AF03: Granary Smart Camera Feeder. Talks on MQTT model PLAF203 (the app learns that
   // from the device's own messages), otherwise handled as a Granary. No camera video.
   "AF03": { device_type: "granary",              model: "AF03" },
+  // AF04: Air Smart Feeder (PLAF108). Same feeding protocol as the Granary; the only
+  // setting it has is the light. Talks on MQTT model PLAF108 (beta, one owner's capture).
+  "AF04": { device_type: "granary",              model: "AF04" },
   // AF05: Polar Wet Food Feeder (PLAF109), early beta. One owner's serial is
   // the only evidence for this prefix so far.
   "AF05": { device_type: "polar",                 model: "AF05" },
@@ -199,6 +202,9 @@ const DEVICE_MQTT_MODELS = {
 const PREFIX_IMAGE_MODELS = {
   "WF01": "plwf106", "WF02": "plwf305", "WF03": "plwf106", "WF04": "plwf116",
   "AF01": "plaf103", "AF03": "plaf203", "AF05": "plaf109", "AF06": "plaf301",
+  // No Air Smart Feeder (PLAF108) picture is bundled: empty means no picture, not
+  // the Granary's.
+  "AF04": "",
 };
 // The model a device reports in its own messages (wire_model) wins when a picture for
 // it is bundled: some models may share a serial prefix (Granary 2 feeders seen with
@@ -229,7 +235,9 @@ function _serialPrefix(serial) {
 function _imageModel(deviceType, serial, wireModel) {
   const wire = (wireModel || "").toLowerCase();
   if (IMAGE_MODELS.includes(wire)) return wire;
-  return PREFIX_IMAGE_MODELS[_serialPrefix(serial)] || DEVICE_MQTT_MODELS[deviceType] || "";
+  const prefix = _serialPrefix(serial);
+  if (prefix in PREFIX_IMAGE_MODELS) return PREFIX_IMAGE_MODELS[prefix];
+  return DEVICE_MQTT_MODELS[deviceType] || "";
 }
 
 function deviceVariants(deviceType, serial, wireModel) {

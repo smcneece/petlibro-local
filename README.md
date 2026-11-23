@@ -53,6 +53,7 @@ If you are not comfortable with these terms, do not use this software!
 | Granary Smart Feeder | AF01 | PLAF103 | Beta |
 | Granary Smart Camera Feeder (single and dual bowl) | AF03 | PLAF203 | Beta: feeding, schedules and settings like the Granary; no camera video |
 | Polar Wet Food Feeder | AF05 (from one owner's serial) | PLAF109 | Early beta, see the [device notes](docs/devices.md#polar-wet-food-feeder-early-beta) |
+| Air Smart Feeder | AF04 | PLAF108 | Beta: feeding, schedules and the light, tested on one real feeder; no volume or button lock, see the [device notes](docs/devices.md#air-smart-feeder-plaf108-beta) |
 
 Notes on each model (the Granary's missing lid and RFID, the WF01 labeling, serial color codes, and the model numbers) are in [Supported device notes](docs/devices.md), along with the firmware versions I have seen. If you want to talk to a device without Home Assistant, the topics and messages are listed in [MQTT protocol notes](docs/mqtt-protocol.md).
 

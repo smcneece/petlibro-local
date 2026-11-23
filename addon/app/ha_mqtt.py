@@ -150,6 +150,11 @@ def _granary_power_confirmed(serial: str, cfg: dict) -> bool:
     return _granary.power_confirmed({**cfg, "serial": serial})
 
 
+def _granary_is_air(serial: str, cfg: dict) -> bool:
+    from device_types.feeders import granary as _granary
+    return _granary.is_air({**cfg, "serial": serial})
+
+
 def feed_result(data: dict, now: float) -> dict:
     """Summary of a finished GRAIN_OUTPUT_EVENT (GRAIN_END) for the Last Feed Result
     entity. Busy: refused because the feeder was already dispensing (nothing lost,
@@ -775,26 +780,28 @@ def _entity_configs(serial: str, cfg: dict, state: dict, extra_icon_names: list[
             "icon":          "mdi:lightbulb",
         })))
 
-        entities.append(("switch", "buttons_lock", _e(serial, "buttons_lock", b, {
-            "name":            "Buttons Lock",
-            "state_topic":     state_topic(serial, "buttons_lock"),
-            "command_topic":   cmd_topic(serial, "buttons_lock"),
-            "payload_on":      "ON",
-            "payload_off":     "OFF",
-            "icon":            "mdi:lock",
-            "entity_category": "config",
-        })))
+        # The Air (PLAF108) has neither of these settings (see granary.is_air)
+        if not _granary_is_air(serial, cfg):
+            entities.append(("switch", "buttons_lock", _e(serial, "buttons_lock", b, {
+                "name":            "Buttons Lock",
+                "state_topic":     state_topic(serial, "buttons_lock"),
+                "command_topic":   cmd_topic(serial, "buttons_lock"),
+                "payload_on":      "ON",
+                "payload_off":     "OFF",
+                "icon":            "mdi:lock",
+                "entity_category": "config",
+            })))
 
-        entities.append(("number", "volume", _e(serial, "volume", b, {
-            "name":          "Volume",
-            "state_topic":   state_topic(serial, "volume"),
-            "command_topic": cmd_topic(serial, "volume"),
-            "min":           0,
-            "max":           100,
-            "step":          1,
-            "mode":          "slider",
-            "icon":          "mdi:volume-high",
-        })))
+            entities.append(("number", "volume", _e(serial, "volume", b, {
+                "name":          "Volume",
+                "state_topic":   state_topic(serial, "volume"),
+                "command_topic": cmd_topic(serial, "volume"),
+                "min":           0,
+                "max":           100,
+                "step":          1,
+                "mode":          "slider",
+                "icon":          "mdi:volume-high",
+            })))
 
     if device_type in ("one_rfid", "granary"):
         # Each alert condition as its own problem binary_sensor (PR #21). States

@@ -185,6 +185,12 @@ function _portionRange(device) {
   return Array.from({ length: max }, (_, i) => i + 1);
 }
 
+// Air Smart Feeder (PLAF108, serial AF04), handled as a Granary. Its only setting is the
+// light: no volume and no Buttons Lock (mirrors granary.is_air in device_types).
+function isAirFeeder(device) {
+  return (device?.serial || "").toUpperCase().startsWith("AF04") || device?.wire_model === "PLAF108";
+}
+
 function fmtPortions(n, gramsPerPortion, unit) {
   if (unit === "cup") return fmtCups(n);
   if (unit === "ml") return `${Math.round(n * FEED_ML_PER_PORTION * 10) / 10} ml`;
