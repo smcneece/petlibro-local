@@ -19,6 +19,18 @@ Requires Python 3.9+, no extra packages.
 
 ---
 
+## replay_capture.py — Play a device against your own broker
+
+Plays the device side of a session (a made-up Granary-style one, or the messages from a `mqtt_proxy.py`
+log, with a fake serial) against your own broker, prints everything Petlibro Local
+sends back and can simulate a finished feed (acknowledgement, then `GRAIN_START` and `GRAIN_END`). Add the fake
+serial as a device in the app first, using a login the broker already knows. Use it to test support for a model without the real feeder. It never talks to the
+PetLibro cloud.
+
+Requires Python 3.9+ and aiomqtt (`pip install aiomqtt`).
+
+---
+
 ## feeder_probe.py — Interactive feeder command tool
 
 Connects to your local Mosquitto broker and lets you send MQTT commands to a feeder
