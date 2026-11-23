@@ -1,0 +1,11 @@
+services:
+  mosquitto:
+    container_name: !reset null
+    ports: !override ["18830:1883"]
+  petlibro-local:
+    image: plit-it-app
+    container_name: !reset null
+    ports: !override ["18765:8765"]
+    volumes: !override ["petlibro-data:/data", "mosquitto-auth:/mosquitto/auth"]
+volumes:
+  petlibro-data:

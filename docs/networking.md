@@ -14,7 +14,7 @@ Before adding any device, confirm your DNS override is in place. `mqtt.us.petlib
 
 **AdGuard Home:** Go to **Filters > DNS Rewrites**, click Add Rewrite, enter `mqtt.us.petlibro.com` as the domain and your HA IP as the answer.
 
-**Router-level DNS:** varies by router; check your router's documentation for "custom DNS records" or "local DNS override."
+**Router-level DNS:** varies by router; check your router's documentation for "custom DNS records" or "local DNS override." For OpenWrt, including firewall rules and capturing a device's traffic, see [OpenWrt](openwrt.md).
 
 You can verify the override is working from any device on your network:
 
