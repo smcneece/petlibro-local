@@ -201,15 +201,12 @@ const DEVICE_MQTT_MODELS = {
 // type is the fallback for a serial not listed here.
 const PREFIX_IMAGE_MODELS = {
   "WF01": "plwf106", "WF02": "plwf305", "WF03": "plwf106", "WF04": "plwf116",
-  "AF01": "plaf103", "AF03": "plaf203", "AF05": "plaf109", "AF06": "plaf301",
-  // No Air Smart Feeder (PLAF108) picture is bundled: empty means no picture, not
-  // the Granary's.
-  "AF04": "",
+  "AF01": "plaf103", "AF03": "plaf203", "AF04": "plaf108", "AF05": "plaf109", "AF06": "plaf301",
 };
 // The model a device reports in its own messages (wire_model) wins when a picture for
 // it is bundled: some models may share a serial prefix (Granary 2 feeders seen with
 // AF03 serials). PLAF105, PLAF205 (Granary 2) and PLAF305 (Granary 2 X) pictures are bundled ahead of support.
-const IMAGE_MODELS = ["plaf103", "plaf105", "plaf109", "plaf203", "plaf205", "plaf301", "plaf305", "plwf106", "plwf116", "plwf305"];
+const IMAGE_MODELS = ["plaf103", "plaf105", "plaf108", "plaf109", "plaf203", "plaf205", "plaf301", "plaf305", "plwf106", "plwf116", "plwf305"];
 // Color choices that differ from the device type's, by picture model.
 const _DUAL_BOWL_VARIANTS = [{ value: "b", label: "Black" }, { value: "w", label: "White" },
                              { value: "bd", label: "Black, dual bowl" }, { value: "wd", label: "White, dual bowl" }];

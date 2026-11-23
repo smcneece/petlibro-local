@@ -44,7 +44,7 @@ Built from one owner's capture of the real PetLibro cloud talking to a feeder (f
 - The light command has the shape the fountains use (`lightSwitch`, `lightAgingType`, the start and end times and their `Utc` twins, `filterLedSwitch`), not the Granary's group of settings. The default hours the cloud sent were 08:00 to 20:00 local.
 - There is no volume and no Buttons Lock. The PetLibro app never sent those to this feeder, so they are hidden in the app and in Home Assistant, and commands for them are refused.
 - No power alerts. At boot it reports `powerType` 2 with `batteryState` `USING` and 100 %, which could be battery or mains; I could not tell, so I did not guess.
-- No picture is bundled for it, so the card shows the generic feeder icon.
+- Black and white pictures are bundled for it (`plaf108_b.png`, `plaf108_w.png`); pick the color on the device's edit screen.
 
 **Not built:** the cloud's public API lists more fields for this model (vacuum and pump state, sleep mode, grain outlet blocked, desiccant days remaining, cover close speed), but this firmware and the PetLibro app version the owner used never showed them, so nothing is guessed. The portions limit stays at the Granary's 12 (the cloud API suggests the Air takes up to 16).
 
