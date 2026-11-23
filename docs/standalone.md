@@ -4,7 +4,7 @@ Contributed by [@MikeFez](https://github.com/MikeFez) (PR #21), who tested it en
 
 Petlibro Local is mainly a Home Assistant add-on, but the same image also runs as a plain Docker container, for people who run Home Assistant in a container or don't run it at all. In standalone mode you point the app at your own MQTT broker and open its web UI directly instead of through Home Assistant.
 
-Home Assistant is optional standalone. Without it, controlling feeders and fountains over MQTT works the same. What you lose is sending alerts through Home Assistant (push, email and persistent notifications) and the area and notify-service dropdowns. Those come back if you set `HA_BASE_URL` and `HA_TOKEN`. If Home Assistant uses the same MQTT broker, the devices' Home Assistant entities show up there as usual.
+Home Assistant is optional standalone. Without it, controlling feeders and fountains over MQTT works the same. What you lose is sending alerts through Home Assistant (push, email and persistent notifications) and the area and notify-service dropdowns. Those come back if you set `HA_BASE_URL` and `HA_TOKEN`. To get alerts without Home Assistant, send them to an [ntfy](https://ntfy.sh) topic or a webhook (see [Notifications without Home Assistant](#notifications-without-home-assistant)). If Home Assistant uses the same MQTT broker, the devices' Home Assistant entities show up there as usual.
 
 ## Prerequisites
 
@@ -68,9 +68,12 @@ openssl rand -hex 32
 | `MQTT_PASS` | Yes | Broker password for this app |
 | `HA_BASE_URL` | No | Home Assistant's REST API, for example `http://homeassistant:8123/api`. Turns on Home Assistant notifications |
 | `HA_TOKEN` | No | Home Assistant long-lived access token, used with `HA_BASE_URL` |
+| `NOTIFY_PUSH_URL` | No | ntfy topic URL or webhook URL for alerts without Home Assistant. Used only while the URL is blank on the Settings page |
+| `NOTIFY_PUSH_FORMAT` | No | `ntfy` (default) or `webhook` |
+| `NOTIFY_PUSH_TOKEN` | No | Access token (sent as a Bearer token) or `user:password` (Basic authentication) |
 | `TZ` | No | Timezone for schedules and logs, for example `America/New_York` |
 
-An MQTT variable that is set wins over the app's Settings page, and that field shows read-only there. Leave a variable unset to manage that field from the Settings page instead.
+An MQTT variable that is set wins over the app's Settings page, and that field shows read-only there. Leave a variable unset to manage that field from the Settings page instead. The `NOTIFY_PUSH_*` variables work the other way round: the Settings page wins, and a variable only fills in a field that is blank there.
 
 Mount a volume at `/data` to keep your devices, pets, settings, and uploaded images and audio.
 
@@ -128,3 +131,12 @@ To send alerts through Home Assistant, create a long-lived access token in Home 
 ```
 
 Leave them unset to run without Home Assistant.
+
+## Notifications without Home Assistant
+
+Alerts can go straight to your phone or any service that takes a webhook, without Home Assistant. In Settings → Notifications, under **Push (ntfy / webhook)**, set the URL, or set the `NOTIFY_PUSH_*` variables above. **Send test notification** saves the form and sends one message, and shows the error if it fails.
+
+- **ntfy** (default format): the URL is the full topic URL, for example `https://ntfy.sh/your-secret-topic` or `http://ntfy.lan/petlibro` on your own ntfy server. The alert text is the message and the alert title is the title. On ntfy.sh the topic name is the only protection, so use one nobody can guess. A self-hosted server with logins takes an access token (`tk_…`) or `user:password` as the token.
+- **Webhook**: the app sends a JSON POST with `title`, `message`, `id` (one per alert type and device) and `source` (`petlibro-local`). The token, if set, goes in an `Authorization` header.
+
+Every alert, pet activity and hasn't-eaten notification goes through it, and each device and pet has a **Push** switch to turn it off, like the other channels. The URL must be `http://` or `https://` and is never followed through a redirect: if the server redirects http to https, use the https URL. The Home Assistant bell, email and mobile channels are skipped while no Home Assistant is set. Nothing is sent when the alert clears (there is no notification to dismiss); a device coming back online sends its own message.

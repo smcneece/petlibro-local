@@ -2463,6 +2463,7 @@ def _send_eating_notification(key: str, pet_cfg: dict, msg: str) -> None:
         "notify_bell":   pet_cfg.get("notify_bell", True),
         "notify_email":  pet_cfg.get("notify_email", True),
         "notify_mobile": pet_cfg.get("notify_mobile", False),
+        "notify_push":   pet_cfg.get("notify_push", True),
     }
     notif_id = f"petlibro_local_{key[:8]}_eating_{int(_time.time())}"
     asyncio.ensure_future(_notif.fire_notification(f"Petlibro Local: {msg}", msg, _storage.get_settings(),
@@ -2601,6 +2602,7 @@ async def _handle_fountain_drink(serial: str, data: dict) -> None:
                     "notify_bell":   pet_cfg.get("notify_bell", True),
                     "notify_email":  pet_cfg.get("notify_email", True),
                     "notify_mobile": pet_cfg.get("notify_mobile", False),
+                    "notify_push":   pet_cfg.get("notify_push", True),
                 }
                 notif_id = f"petlibro_local_{(pet_id or serial)[:8]}_drink_{int(_time.time())}"
                 await _notif.fire_notification(title, msg, _storage.get_settings(), notify_cfg,
@@ -3206,6 +3208,7 @@ async def _offline_watchdog():
                         "notify_bell":   pet.get("notify_bell",   True),
                         "notify_email":  pet.get("notify_email",  True),
                         "notify_mobile": pet.get("notify_mobile", False),
+                        "notify_push":   pet.get("notify_push",   True),
                     }
                     notif_id = f"petlibro_local_{pet_id[:8]}_no_eat"
                     asyncio.ensure_future(

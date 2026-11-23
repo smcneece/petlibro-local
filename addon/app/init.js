@@ -192,6 +192,17 @@ async function detectLanguage(availableLangs) {
   });
   document.getElementById("btn-save-general").addEventListener("click", () => saveSettings("general"));
   document.getElementById("btn-save-notifications").addEventListener("click", () => saveSettings("notifications"));
+  document.getElementById("btn-push-test").addEventListener("click", async () => {
+    const out = document.getElementById("push-test-result");
+    out.textContent = "…";
+    try {
+      await saveSettings("notifications");  // the test uses what is saved
+      const r = await api("POST", "/api/notify/test");
+      out.textContent = r.ok ? t("settings.push_test_ok") : t("settings.push_test_fail", {error: r.error});
+    } catch (e) {
+      out.textContent = t("settings.push_test_fail", {error: e.message});
+    }
+  });
   document.getElementById("btn-save-mqtt").addEventListener("click", () => saveSettings("mqtt"));
   document.getElementById("btn-save-audio-settings").addEventListener("click", () => saveSettings("audio"));
   wireAudioSettingsControls();

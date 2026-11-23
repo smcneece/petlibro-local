@@ -1246,6 +1246,10 @@ function buildNotificationsTab(device) {
       <span class="toggle-label">${t("notif.mobile")}</span>
       <input type="checkbox" class="notif-check" id="nchan-mobile" ${device.notify_mobile ? "checked" : ""}>
     </div>
+    <div class="toggle-row">
+      <span class="toggle-label">${t("notif.push")}</span>
+      <input type="checkbox" class="notif-check" id="nchan-push" ${device.notify_push !== false ? "checked" : ""}>
+    </div>
   </div>
   <div id="nchan-email-section" style="${device.notify_email !== false ? "" : "display:none"}">
     <div class="form-row">
@@ -1810,6 +1814,7 @@ function wireDeviceTabHandlers(tabName) {
           notify_email: document.getElementById("nchan-email")?.checked !== false,
           notify_email_address: (document.getElementById("nchan-email-addr")?.value || "").trim(),
           notify_mobile: !!document.getElementById("nchan-mobile")?.checked,
+          notify_push: document.getElementById("nchan-push")?.checked !== false,
           notify_mobile_service: document.getElementById("nchan-mobile-svc")?.value || "",
           ...(battLowEl ? { battery_low_pct: Math.max(0, Math.min(99, parseInt(battLowEl.value) || 0)) } : {}),
         };

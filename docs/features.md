@@ -113,6 +113,7 @@ Petlibro Local sends notifications through the channels you turn on:
 - **HA persistent notification**: appears in the Home Assistant notification panel and survives app restarts.
 - **Email**: sent via any Home Assistant `notify` service. Configure the service name in the device's notification settings.
 - **Mobile (Home Assistant Companion app)**: a push notification sent through the Home Assistant Companion app on your phone, not a text message. It uses a Home Assistant `notify` service that targets your phone, which you pick in Settings or per device.
+- **Push (ntfy / webhook)**: sends the alert straight to an [ntfy](https://ntfy.sh) topic or a webhook, so it works without Home Assistant. Set the URL in Settings → Notifications (or with the `NOTIFY_PUSH_*` environment variables in a standalone container; see [standalone.md](standalone.md#notifications-without-home-assistant)). Each device and each pet has a switch for it.
 
 **Device alerts** are configurable per device in the device's detail modal under the Alerts tab. Alert types include:
 

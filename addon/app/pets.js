@@ -112,6 +112,7 @@ function openPetModal(pet) {
   document.getElementById("p-notify-bell").checked   = pet ? (pet.notify_bell   ?? true)  : true;
   document.getElementById("p-notify-email").checked  = pet ? (pet.notify_email  ?? true)  : true;
   document.getElementById("p-notify-mobile").checked = pet ? (pet.notify_mobile ?? false) : false;
+  document.getElementById("p-notify-push").checked   = pet ? (pet.notify_push   ?? true)  : true;
 
   // Hasn't eaten alert
   document.getElementById("p-no-eat-enabled").checked = pet ? (pet.no_eat_alert_enabled ?? false) : false;
@@ -183,6 +184,7 @@ async function savePet() {
     notify_bell:          document.getElementById("p-notify-bell").checked,
     notify_email:         document.getElementById("p-notify-email").checked,
     notify_mobile:        document.getElementById("p-notify-mobile").checked,
+    notify_push:          document.getElementById("p-notify-push").checked,
     no_eat_alert_enabled: document.getElementById("p-no-eat-enabled").checked,
     no_eat_alert_hours:   parseInt(document.getElementById("p-no-eat-hours").value) || 12,
   };

@@ -169,6 +169,37 @@
           <p class="form-hint" data-i18n="settings.mobile_hint">Mobile alerts are push notifications sent through the Home Assistant Companion app on your phone, not text messages. This is the default phone (mobile_app service) used when a device has Mobile enabled but no per-device service set.</p>
         </div>
       </div>
+      <div class="settings-section">
+        <h2 data-i18n="settings.push_heading">Push (ntfy / webhook)</h2>
+        <p class="form-hint" style="margin-bottom:14px" data-i18n="settings.push_hint">Sends alerts straight to an ntfy topic or a webhook, with no Home Assistant needed. Leave the URL blank to turn it off.</p>
+        <div class="form-row">
+          <label class="form-label" data-i18n="settings.push_url">URL</label>
+          <div class="pw-wrap">
+            <input class="form-input" id="s-notify-push-url" type="password" autocomplete="off" placeholder="https://ntfy.sh/your-secret-topic">
+            <button class="btn-eye" type="button" data-target="s-notify-push-url" title="Show/hide">👁</button>
+          </div>
+          <p class="form-hint" data-i18n="settings.push_url_hint">The full ntfy topic URL, or the webhook URL. With ntfy.sh the topic name is the only protection, so pick one nobody can guess.</p>
+        </div>
+        <div class="form-row">
+          <label class="form-label" data-i18n="settings.push_format">Format</label>
+          <select class="form-select" id="s-notify-push-format">
+            <option value="" data-i18n="settings.push_format_ntfy">ntfy</option>
+            <option value="webhook" data-i18n="settings.push_format_webhook">Webhook (JSON)</option>
+          </select>
+          <p class="form-hint" data-i18n="settings.push_format_hint">ntfy gets the message as the body and the title in the query. A webhook gets a JSON POST with title, message, id and source.</p>
+        </div>
+        <div class="form-row">
+          <label class="form-label" data-i18n="settings.push_token">Access token (optional)</label>
+          <div class="pw-wrap">
+            <input class="form-input" id="s-notify-push-token" type="password" autocomplete="off" placeholder="tk_… or user:password">
+            <button class="btn-eye" type="button" data-target="s-notify-push-token" title="Show/hide">👁</button>
+          </div>
+          <p class="form-hint" data-i18n="settings.push_token_hint">Sent as a Bearer token, or as Basic authentication when it has the form user:password.</p>
+        </div>
+        <p class="form-hint" id="push-env-note" style="display:none" data-i18n="settings.push_env_note">Fields left blank here use the container's NOTIFY_PUSH_* environment variables.</p>
+        <button class="btn-secondary" id="btn-push-test" type="button" data-i18n="settings.push_test">Send test notification</button>
+        <span class="form-hint" id="push-test-result" style="margin-left:8px"></span>
+      </div>
       <button class="btn-primary" id="btn-save-notifications">
         <span data-i18n="settings.save">Save</span>
         <span class="save-indicator" id="save-indicator-notifications" data-i18n="settings.saved">✓ Saved</span>
@@ -621,6 +652,10 @@
         <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
           <input type="checkbox" id="p-notify-mobile" style="width:16px;height:16px;accent-color:var(--pl-accent)">
           <span>Mobile (Home Assistant Companion app)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="p-notify-push" style="width:16px;height:16px;accent-color:var(--pl-accent)">
+          <span>Push (ntfy / webhook)</span>
         </label>
       </div>
     </div>
