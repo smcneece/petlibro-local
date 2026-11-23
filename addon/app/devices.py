@@ -961,6 +961,69 @@ async def reconcile_plan_timezones() -> None:
             _LOGGER.exception("Plan timezone reconcile failed for %s...", serial[:6])
 
 
+def _local_offset_minutes() -> int:
+    """UTC offset (minutes) the schedule editor converts with: the Settings feeder
+    timezone, else this host's local time (the add-on runs in HA's timezone)."""
+    import datetime as _dt
+    basis = current_plan_tz_basis()
+    if basis is not None:
+        return basis["offset"] // 60
+    off = _dt.datetime.now().astimezone().utcoffset()
+    return int(off.total_seconds() // 60) if off else 0
+
+
+def utc_days_from_shown(plan: dict, offset_min: int) -> list:
+    """The UTC weekdays for a plan whose repeatDay holds the local weekdays the
+    schedule editor showed (before issue #28 it saved and showed them unconverted)."""
+    days = plan.get("repeatDay") or []
+    if len(set(days)) >= 7:
+        return list(days)
+    h, m = (int(x) for x in plan["executionTime"].split(":"))
+    shift = -((h * 60 + m + offset_min) // 1440)    # local day minus UTC day, negated
+    if not shift:
+        return list(days)
+    return sorted({((d - 1 + shift) % 7) + 1 for d in days})
+
+
+def migrate_plan_days_to_utc() -> None:
+    """One time (issue #28): plans saved before this version have the local weekdays
+    the editor showed, but the feeder reads repeatDay as UTC weekdays, so a meal whose
+    local and UTC dates differ (evening in the Americas, early morning east of UTC)
+    ran a day early or late. Keep each plan on the day and time the editor showed and
+    re-send it until the feeder acks it."""
+    import time as _time
+    import storage as _storage
+    if _storage.plan_days_migrated():
+        return
+    offset_min = _local_offset_minutes()
+    now_ms = int(_time.time() * 1000)
+    for serial, cfg in _storage.get_devices().items():
+        if cfg.get("device_type") == "polar":
+            continue   # dated one-off plans, no repeatDay
+        plans = _storage.get_device_feeding_plans(serial)
+        if not plans or not _plans_valid(plans):
+            continue
+        new_plans, changed = [], []
+        for p in plans:
+            q = dict(p)
+            days = utc_days_from_shown(p, offset_min)
+            if set(days) != set(p.get("repeatDay") or []):
+                changed.append((p.get("executionTime"), p.get("repeatDay"), days))
+                q["repeatDay"] = days
+            new_plans.append(q)
+        if not changed:
+            continue
+        for q in new_plans:
+            q["syncTime"] = now_ms
+        b = _storage.get_feeding_plans_tz_basis(serial) or {}
+        b.update(pending_sync=now_ms, last_sent=0, sends=0)
+        b.pop("prev", None)
+        _storage.save_device_feeding_plans(serial, new_plans, tz_basis=b)
+        _LOGGER.info("Plan weekdays converted to UTC for %s... (issue #28, UTC%+.1f): %s",
+                     serial[:6], offset_min / 60, changed)
+    _storage.mark_plan_days_migrated()
+
+
 def _plan_ack_received(serial: str, acked_plans) -> None:
     """Clear a pending re-send once the feeder acks every enabled plan with the
     pending syncTime."""

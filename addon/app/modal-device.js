@@ -772,7 +772,7 @@ function _planSkipped(plan) {
 // if it never runs. Skipping it sets skipEndTime to the end of that local day,
 // the same rule the Petlibro app uses for a same-day skip.
 function _nextOccurrenceDayOffset(plan) {
-  const days = plan.repeatDay || [];
+  const days = _planLocalDays(plan);
   if (!days.length) return null;
   const now = _feederNowParts();
   const [h, m] = _utcToLocal(plan.executionTime || "00:00").split(":").map(Number);
@@ -864,7 +864,7 @@ function buildScheduleTab(plans) {
     const plan = plans[i];
     const enabled = plan._enabled !== false;
     const skipped = _planSkipped(plan);
-    const dayLabel = _schedDayLabel(plan.repeatDay);
+    const dayLabel = _schedDayLabel(_planLocalDays(plan));
     const portions = plan.grainNum || 1;
     const sound = plan.enableAudio ? ` · ${t("schedule.sound_times", {n: plan.audioTimes||1})}` : "";
     return `<div class="sched-row${enabled?"":' disabled'}" data-idx="${i}">
@@ -1049,7 +1049,7 @@ function wireScheduleTabHandlers() {
     document.getElementById("sf-time").value = plan ? _utcToLocal(plan.executionTime || "08:00") : "08:00";
     document.getElementById("sf-edit-idx").value = idx >= 0 ? idx : "";
     // Days
-    const rdays = new Set(plan?.repeatDay || _RDAY);
+    const rdays = new Set(plan ? _planLocalDays(plan) : _RDAY);
     document.querySelectorAll(".day-chip").forEach(c => c.classList.toggle("on", rdays.has(+c.dataset.rday)));
     // Portions
     const portions = plan?.grainNum || 1;
@@ -1146,7 +1146,7 @@ function wireScheduleTabHandlers() {
     const planData = {
       planId: editIdx !== "" ? _schedPlans[+editIdx].planId : (5000000 + Math.floor(Math.random() * 1000000)),
       executionTime: _localToUtc(time),
-      repeatDay,
+      repeatDay: _localDaysToUtc(repeatDay, time),   // UTC weekdays, issue #28
       enableAudio,
       audioTimes,
       grainNum,

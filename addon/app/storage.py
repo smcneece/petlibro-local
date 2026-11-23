@@ -360,6 +360,17 @@ def save_device_feeding_plans(serial: str, plans: list, tz_basis=_KEEP):
     _save(data)
 
 
+def plan_days_migrated() -> bool:
+    """True once stored plan weekdays have been converted to UTC (issue #28)."""
+    return bool(_load().get("_plan_days_utc"))
+
+
+def mark_plan_days_migrated():
+    data = _load()
+    data["_plan_days_utc"] = True
+    _save(data)
+
+
 def get_feeding_plans_tz_basis(serial: str) -> dict | None:
     return _load().get("_feeding_plans_tz", {}).get(serial)
 

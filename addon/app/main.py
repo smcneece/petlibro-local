@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-VERSION = "2026.11.3"
+VERSION = "2026.11.4"
 
 # Deployment mode (PR #21, MikeFez). As a Home Assistant add-on the Supervisor
 # injects SUPERVISOR_TOKEN and ingress fronts the UI. A standalone Docker container
@@ -1013,6 +1013,10 @@ async def on_startup(app):
         if model:
             devices.register_device(serial, model, device_type)
     devices.suppress_alerts(True)
+    try:
+        devices.migrate_plan_days_to_utc()   # one time, issue #28
+    except Exception:
+        _LOGGER.exception("Plan weekday conversion failed")
     await devices.start()
     _LOGGER.info("Petlibro Local v%s started", VERSION)
 

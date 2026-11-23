@@ -277,6 +277,26 @@ function _localToUtc(hhmm) {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
+// Plan weekdays (repeatDay, 1=Mon..7=Sun) are UTC weekdays on the wire, the same
+// as executionTime is a UTC time: confirmed on a One RFID (2026-11-22), a Monday
+// 03:48 UTC plan fed on Sunday 8:48 PM Mountain and a Sunday 03:45 UTC plan did
+// not. When a local time and its UTC time fall on different dates, the days move
+// by one (issue #28). The editor shows and takes local days.
+function _shiftDays(days, shift) {
+  if (!days || !shift || days.length >= 7) return days ? [...days] : [];
+  return [...new Set(days.map(d => ((d - 1 + shift) % 7 + 7) % 7 + 1))].sort((a, b) => a - b);
+}
+function _planLocalDays(plan) {
+  const [h, m] = (plan.executionTime || "00:00").split(":").map(Number);
+  const shift = Math.floor((h * 60 + m + Math.round(_schedTzOffset() * 60)) / 1440);
+  return _shiftDays(plan.repeatDay || [], shift);
+}
+function _localDaysToUtc(days, localHHMM) {
+  const [h, m] = localHHMM.split(":").map(Number);
+  const shift = Math.floor((h * 60 + m - Math.round(_schedTzOffset() * 60)) / 1440);
+  return _shiftDays(days, shift);
+}
+
 // Rounded, not floored: a value just saved as "N days" is always read back a
 // few milliseconds later, so flooring would show N-1 essentially every time
 // (20.99999 days floors to 20 even though nothing meaningfully elapsed).
@@ -344,7 +364,7 @@ function nextMealLabel(plans) {
     const day = new Date(now); day.setDate(day.getDate() + off);
     const plDay = day.getDay() === 0 ? 7 : day.getDay(); // PetLibro: 1=Mon…7=Sun
     const candidates = enabled
-      .filter(p => (p.repeatDay || []).includes(plDay))
+      .filter(p => _planLocalDays(p).includes(plDay))
       .map(p => ({ ...p, localTime: _utcToLocal(p.executionTime) }))
       .sort((a, b) => a.localTime.localeCompare(b.localTime));
     for (const plan of candidates) {
