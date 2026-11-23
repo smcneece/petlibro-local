@@ -30,6 +30,11 @@ services:
       # Home Assistant (optional, only for sending alerts through HA)
       # HA_BASE_URL: "http://homeassistant:8123/api"
       # HA_TOKEN: "<long-lived access token>"
+      # Alerts without Home Assistant (optional): an ntfy topic URL or a webhook URL.
+      # Also settable in the app under Settings > Notifications, which wins over these.
+      # NOTIFY_PUSH_URL: "https://ntfy.sh/your-secret-topic"
+      # NOTIFY_PUSH_FORMAT: "ntfy"      # ntfy (default) or webhook
+      # NOTIFY_PUSH_TOKEN: ""           # access token, or user:password
       # Timezone for schedules and logs
       TZ: "America/New_York"
 

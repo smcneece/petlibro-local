@@ -19,3 +19,7 @@ def _headers() -> dict:
 
 def _token() -> str:
     return _HA_TOKEN
+
+def ha_configured() -> bool:
+    """True when there is a token to reach Home Assistant (add-on, or HA_TOKEN set)."""
+    return bool(_HA_TOKEN)

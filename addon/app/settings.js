@@ -281,6 +281,21 @@ function renderSettings() {
   const emailTo = document.getElementById("s-notify-email-to");
   if (emailTo) emailTo.value = _settings.notify_email_to || "";
 
+  // A blank push field falls back to a NOTIFY_PUSH_* environment variable, so say so.
+  const envFallback = _settings.env_fallback || [];
+  const pushFields = {notify_push_url: "s-notify-push-url", notify_push_format: "s-notify-push-format", notify_push_token: "s-notify-push-token"};
+  for (const [key, id] of Object.entries(pushFields)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.value = _settings[key] || "";
+    if (el.tagName === "INPUT") {
+      el.dataset.defaultPh = el.dataset.defaultPh ?? el.placeholder;
+      el.placeholder = envFallback.includes(key) ? t("settings.push_from_env") : el.dataset.defaultPh;
+    }
+  }
+  const pushEnvNote = document.getElementById("push-env-note");
+  if (pushEnvNote) pushEnvNote.style.display = envFallback.length ? "" : "none";
+
   _populateNotifyDropdowns();
 
   const langSel = document.getElementById("s-language");
@@ -314,6 +329,9 @@ async function saveSettings(fromTab) {
     notify_email_service: document.getElementById("s-notify-email-service")?.value || "",
     notify_email_to: (document.getElementById("s-notify-email-to")?.value || "").trim(),
     notify_mobile_default_service: document.getElementById("s-notify-mobile-service")?.value || "",
+    notify_push_url: (document.getElementById("s-notify-push-url")?.value || "").trim(),
+    notify_push_format: document.getElementById("s-notify-push-format")?.value || "",
+    notify_push_token: (document.getElementById("s-notify-push-token")?.value || "").trim(),
     local_audio_base_url: (document.getElementById("s-local-audio-base-url")?.value || "").trim(),
   };
   const statusEl = document.getElementById("mqtt-status");

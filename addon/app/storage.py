@@ -29,6 +29,9 @@ DEFAULT_SETTINGS = {
     "notify_email_service": "",
     "notify_email_to": "",
     "notify_mobile_default_service": "",
+    "notify_push_url": "",
+    "notify_push_format": "",
+    "notify_push_token": "",
     "local_audio_base_url": "",
 }
 
@@ -40,7 +43,7 @@ ALLOWED_DEVICE_FIELDS = {
     "filter_life_days", "last_cleaned_ts", "cleaning_interval_days",
     "low_water_grams", "min_drink_grams", "notifications",
     "notify_bell", "notify_email", "notify_email_address",
-    "notify_mobile", "notify_mobile_service",
+    "notify_mobile", "notify_mobile_service", "notify_push",
     "desiccant_life_days", "last_desiccant_ts",
     "last_bowl_cleaned_ts", "bowl_cleaning_interval_days",
     "last_housing_cleaned_ts", "housing_cleaning_interval_days",
@@ -68,7 +71,7 @@ ALLOWED_DEVICE_FIELDS = {
 
 ALLOWED_PET_FIELDS = {
     "name", "breed", "weight_kg", "image_url", "device_serials", "rfid_tag",
-    "notify_bell", "notify_email", "notify_mobile",
+    "notify_bell", "notify_email", "notify_mobile", "notify_push",
     "no_eat_alert_enabled", "no_eat_alert_hours",
     "notify_eating_activity",
     "eating_combine_mins",
@@ -119,6 +122,7 @@ _DEVICE_DEFAULTS = {
     "notify_email_address": "",
     "notify_mobile": False,
     "notify_mobile_service": "",
+    "notify_push": True,
 }
 
 
@@ -183,9 +187,36 @@ def _env_overlay(settings: dict) -> dict:
     return settings
 
 
-def get_settings() -> dict:
+# Push notifications (ntfy or a webhook) can be set from the Settings page or from
+# environment variables. Unlike the MQTT ones above, the Settings page wins: a variable
+# only fills in a setting that is blank there. get_settings(include_env_fallback=False)
+# is the view the Settings page shows and saves, so a value that comes from the
+# environment never gets copied into the data file.
+_ENV_FALLBACK_SETTINGS = {
+    "notify_push_url": "NOTIFY_PUSH_URL",
+    "notify_push_format": "NOTIFY_PUSH_FORMAT",
+    "notify_push_token": "NOTIFY_PUSH_TOKEN",
+}
+
+
+def env_fallback_settings() -> list:
+    """Keys that are blank in the data file and set by an environment variable."""
     stored = _load().get("settings", {})
-    return _env_overlay({**DEFAULT_SETTINGS, **stored})
+    return [key for key, var in _ENV_FALLBACK_SETTINGS.items()
+            if not str(stored.get(key) or "").strip() and os.environ.get(var, "").strip()]
+
+
+def _env_fallback(settings: dict) -> dict:
+    for key, var in _ENV_FALLBACK_SETTINGS.items():
+        if not str(settings.get(key) or "").strip():
+            settings[key] = os.environ.get(var, "").strip()
+    return settings
+
+
+def get_settings(include_env_fallback: bool = True) -> dict:
+    stored = _load().get("settings", {})
+    settings = _env_overlay({**DEFAULT_SETTINGS, **stored})
+    return _env_fallback(settings) if include_env_fallback else settings
 
 
 def save_settings(updates: dict) -> dict:

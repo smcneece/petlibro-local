@@ -15,6 +15,7 @@ import devices
 import ha_api
 import mosquitto
 import mqtt_broker
+import notifications
 import polar_control
 import storage
 
@@ -630,14 +631,29 @@ async def handle_api_login(request):
 
 async def handle_api_settings_get(request):
     return web.json_response({
-        **storage.get_settings(),
+        **storage.get_settings(include_env_fallback=False),
         "env_managed": storage.env_managed_settings(),
+        "env_fallback": storage.env_fallback_settings(),
     })
+
+
+async def handle_api_notify_test(request):
+    """Send a test message through the push (ntfy or webhook) channel."""
+    sent, reason = await notifications.send_push(
+        "Petlibro Local: test notification",
+        "If you can read this, push notifications work.",
+        storage.get_settings(), "petlibro_local_test")
+    return web.json_response({"ok": sent, "error": reason})
 
 
 async def handle_api_settings_post(request):
     try:
         data = await request.json()
+        url = str(data.get("notify_push_url") or "").strip()
+        if url and not notifications.push_configured({"notify_push_url": url}):
+            return web.Response(status=400, text="The push URL must start with http:// or https://")
+        if data.get("notify_push_format") not in (None, "", "ntfy", "webhook"):
+            return web.Response(status=400, text="The push format must be ntfy or webhook")
         result = storage.save_settings(data)
         settings = storage.get_settings()
         devices.configure(
@@ -657,7 +673,8 @@ async def handle_api_settings_post(request):
             _LOGGER.info("MQTT connection test: OK")
         else:
             _LOGGER.warning("MQTT connection test: FAILED — check host, port, username, password")
-        return web.json_response({**result, "mqtt_ok": mqtt_ok})
+        return web.json_response({**result, "mqtt_ok": mqtt_ok,
+                                  "env_fallback": storage.env_fallback_settings()})
     except Exception:
         _LOGGER.exception("Failed to save settings")
         return web.Response(status=400, text="Bad request")
@@ -1127,6 +1144,7 @@ def main():
     app.router.add_post("/api/login",                    handle_api_login)
     app.router.add_get("/api/settings",                  handle_api_settings_get)
     app.router.add_post("/api/settings",                 handle_api_settings_post)
+    app.router.add_post("/api/notify/test",              handle_api_notify_test)
 
     app.router.add_post("/api/capture/start",            handle_api_capture_start)
     app.router.add_get("/api/capture/status",            handle_api_capture_status)
