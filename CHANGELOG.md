@@ -3,6 +3,8 @@
 For full release notes and details on each version, see the [GitHub Releases page](https://github.com/smcneece/petlibro-local/releases).
 
 ## Unreleased
+- New Air Smart Feeder (PLAF108, serial prefix AF04), beta, from one owner's capture and run on that feeder: Feed Now, scheduled feeding plans, the light and the usual state (food, battery, Wi-Fi, firmware) have worked there for several days. It is added as a Granary device. There is no volume or Buttons Lock, since the PetLibro app never sends them to this model, and no power alerts yet. Details in docs/devices.md
+- New tool: `tools/replay_capture.py` plays a device against your own broker, from a `mqtt_proxy.py` log or a made-up session, to test support for a model without the real feeder
 - Fixed: a feeding plan set for specific days could run on the wrong day when its time falls on a different date in UTC, for example evening meals in the Americas or early morning meals in Asia and Australia (issue #28, reported by TrpleD). The feeder reads a plan's days in UTC, the same as its time, but the Schedule tab sent the local days unchanged, so a Monday 8 PM meal in US Central time ran Sunday at 8 PM. The device card's Next Meal had the same mistake. Daily plans were never affected. Plans you already saved are corrected once when you update, keeping the days and times your Schedule tab shows, and sent to the feeder again. Please check your schedule once after updating, especially if a feeder ran a meal a day early or late. Confirmed on a One RFID; it applies to the Granary and Granary camera feeder too
 
 ## 2026.11.3

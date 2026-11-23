@@ -340,7 +340,7 @@ def _mqtt_model(device_type: str) -> str:
 # went to a topic the feeder never listens on. The first guess comes from the
 # serial prefix, then from what was learned from the device's own messages
 # (saved with the device, so it also holds right after a restart).
-_PREFIX_WIRE_MODELS = {"AF03": "PLAF203"}
+_PREFIX_WIRE_MODELS = {"AF03": "PLAF203", "AF04": "PLAF108"}
 _WIRE_MODEL_RE = __import__("re").compile(r"^[A-Z0-9]{4,12}$")
 _wire_model: dict[str, str] = {}
 
@@ -424,6 +424,32 @@ def _granary_settings_bundle(serial: str, overrides: dict) -> dict:
     confirmed to work fine. Matching the observed pattern here rather than
     assuming a partial update also works for this device."""
     state = _state.get(serial, {})
+    import storage as _storage
+    cfg = {**_storage.get_devices().get(serial, {}), "serial": serial}
+    from device_types.feeders import granary as _granary
+    if _granary.is_air(cfg):
+        # The Air (PLAF108) vendor app only ever sent the light settings, always
+        # together with the stored light hours (proxy capture, 2026-11-21), and has
+        # no volume or Buttons Lock to send.
+        unsupported = set(overrides) - {"lightSwitch"}
+        if unsupported:
+            raise RuntimeError(f"{', '.join(sorted(unsupported))} is not supported by this feeder")
+        start = cfg.get("light_start_time") or "08:00"
+        end = cfg.get("light_end_time") or "20:00"
+        aging = state.get("lightAgingType", 1)
+        air_bundle = {
+            "lightSwitch":          overrides.get("lightSwitch", state.get("lightSwitch", True)),
+            "lightAgingType":       aging,
+            "lightingStartTime":    start,
+            "lightingStartTimeUtc": _local_hhmm_to_utc(start),
+            "lightingEndTime":      end,
+            "lightingEndTimeUtc":   _local_hhmm_to_utc(end),
+            "filterLedSwitch":      True,
+        }
+        if aging == 2:
+            # Scheduled light: the capture also carried the window length in minutes.
+            air_bundle["lightingTimes"] = _minutes_between(start, end)
+        return air_bundle
     bundle = {
         "volume":                state.get("volume", 50),
         "audioUrl":               state.get("audioUrl", ""),

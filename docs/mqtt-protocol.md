@@ -23,6 +23,7 @@ Everything is under `dl/<model>/<serial>/device/`, where `<model>` is the MQTT m
 | Granary Smart Feeder | AF01 | PLAF103 |
 | Polar Wet Food Feeder | AF05 | PLAF109 |
 | Granary Smart Camera Feeder (basic support, no video) | AF03 | PLAF203 |
+| Air Smart Feeder (beta) | AF04 | PLAF108 |
 
 Each channel has two directions, `post` (the device sends) and `sub` (the cloud, or you, send to the device):
 
@@ -133,6 +134,20 @@ Details and what is unconfirmed are in the [device notes](devices.md#polar-wet-f
 - **Schedules:** a list of dated plans (`planId`, `executionTime`, `executionDay`, `plate`, `feedingDuration`, no `feedNowState`), at most three. To change anything the app sends an empty list first and then the new one (observed).
 - **Pet sensor, on `event/post`:** `PET_DETECT_EVENT` with `type` NEAR or LEAVE, and `MACHINE_INFRARED_EVENT` with `irState` true or false (observed).
 - **Open question:** whether `feedingDuration` is in seconds or minutes.
+
+## Air Smart Feeder (PLAF108), beta
+
+Observed once, from a capture of the real cloud talking to one feeder (firmware 2.0.14, hardware 1.0.0), then run against Petlibro Local. Plain MQTT on 1883; the device subscribes to `dl/PLAF108/<serial>/device/+/sub` and the client id is the serial. Most of it is the Granary protocol above (same `MANUAL_FEEDING_SERVICE`, `FEEDING_PLAN_SERVICE`, `GET_FEEDING_PLAN_EVENT`, `GRAIN_OUTPUT_EVENT`). What is specific:
+
+- **Boot:** `NTP`, then `HEARTBEAT` (about every 60 seconds), then `ATTR_PUSH_EVENT`, `GET_FEEDING_PLAN_EVENT` and `DEVICE_START_EVENT` (`success`, `pid` PLAF108, `mac`, `hardwareVersion`, `softwareVersion`). The cloud then sends `DEVICE_CONFIG_SYNC` (the list of servers it uses) and `FEEDING_PLAN_SERVICE`, and the device acknowledges both.
+- **State**, `ATTR_PUSH_EVENT`: `powerMode`, `powerType`, `electricQuantity`, `batteryState`, `surplusGrain` (true when there is food), `motorState`, `wifiSsid`, `enableLight`, `lightSwitch`, `lightAgingType`, `powerDownStartTimeUtc` and `powerDownEndTimeUtc`. `powerType` was 2 with `batteryState` `USING` and 100 % at boot; whether that means battery or mains is not known.
+- **Feed Now:** `MANUAL_FEEDING_SERVICE` with `grainNum`. The device acks on `service/post`, then sends `GRAIN_OUTPUT_EVENT` on `event/post` with the command's `msgId`: `execStep` `GRAIN_START` with `finished` false, then `GRAIN_END` with `finished` true and `actualGrainNum`. The cloud acknowledges each one with `code` 0 and the same `execStep`.
+- **Plans:** the same shape as the Granary (`planId`, `executionTime` UTC, `repeatDay`, `enableAudio`, `audioTimes`, `grainNum`, `syncTime`). A disabled plan is left out of the list. The device acks with `[{planId, syncTime}]` only.
+- **Light:** `ATTR_SET_SERVICE` with the fountain's fields, not the Granary's group: `lightSwitch`, `lightAgingType` (1 always, 2 scheduled), `lightingStartTime`, `lightingEndTime` and the `Utc` twins, `lightingTimes` (the window in minutes, only with aging type 2), and `filterLedSwitch` true. The device acks with `code` 0 and reports the new values (and `enableLight`) in `ATTR_PUSH_EVENT`.
+- **Not seen:** `volume`, `audioUrl` and `disableHardwareButton` were never sent by the PetLibro app, so this model probably has no volume or button lock.
+- **Log reports:** `DEVICE_LOG_REPORT_EVENT` can carry `NET_CONNECT_ERR` entries for connection attempts that failed while the broker was unreachable.
+
+Source: `addon/app/devices.py`, search `_granary_settings_bundle` and `_PREFIX_WIRE_MODELS`.
 
 ## Camera feeders (PLAF203)
 

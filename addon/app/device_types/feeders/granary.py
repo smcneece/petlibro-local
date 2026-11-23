@@ -33,12 +33,21 @@ from . import maintenance as _maint
 DEVICE_TYPES = ["granary"]
 
 
+def is_air(cfg: dict) -> bool:
+    """Air Smart Feeder (PLAF108, serial AF04), handled as a Granary. Same feeding
+    protocol (one proxy capture, fw 2.0.14), but its settings are only the light:
+    no volume, no Buttons Lock (never sent by the vendor app, so never sent here)."""
+    serial = str(cfg.get("serial") or "").upper()
+    return serial.startswith("AF04") or cfg.get("wire_model") == "PLAF108"
+
+
 def power_confirmed(cfg: dict) -> bool:
     """powerType is confirmed on the plain Granary (PLAF103) only. The camera
     Granary (PLAF203, serial AF03, handled as a Granary) sent 2, then 1, then 3
-    within one boot in the only capture, so no power alert or sensor for it yet."""
+    within one boot in the only capture, so no power alert or sensor for it yet.
+    The Air (PLAF108) reported 2 at boot with a full battery in its only capture."""
     serial = str(cfg.get("serial") or "").upper()
-    return not serial.startswith("AF03") and cfg.get("wire_model") != "PLAF203"
+    return not serial.startswith("AF03") and cfg.get("wire_model") != "PLAF203" and not is_air(cfg)
 
 MQTT_MODELS = {
     "granary": "PLAF103",
